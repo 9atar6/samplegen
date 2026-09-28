@@ -37,6 +37,15 @@ __all__ = ["GenerationRequest", "Generator", "sample_name"]
 Finisher = Callable[[np.ndarray, int], np.ndarray]
 
 
+def read_engine_wav(path: Path) -> tuple[np.ndarray, int]:
+    """Read what the engine wrote; refuse broken output (NaN/inf) instead of saving a silent file."""
+    audio, sr = read_wav(path)
+    if not np.isfinite(audio).all():
+        path.unlink(missing_ok=True)
+        raise EngineError("The engine produced broken audio (NaN). Try again, or with another seed.")
+    return audio, sr
+
+
 @dataclass(frozen=True)
 class PreparedJob:
     graph: dict
@@ -134,7 +143,7 @@ class Generator:
             if not outputs:
                 raise EngineError("The engine returned no audio for part of the keyboard.")
             raw_path = self._raw_output_path(outputs[0])
-            raw, sample_rate = read_wav(raw_path)
+            raw, sample_rate = read_engine_wav(raw_path)
             raw_path.unlink(missing_ok=True)
             notes_audio.update(slice_chunk(remove_dc(raw), notes, sample_rate))
         notes_audio = normalize_together(notes_audio)

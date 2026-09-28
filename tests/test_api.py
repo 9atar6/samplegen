@@ -30,7 +30,10 @@ def generate(client, jobs, **overrides):
 
 def test_status_and_catalog(app_env):
     client, _, _ = app_env
-    assert client.get("/api/status").json()["engine"] == "ready"
+    status = client.get("/api/status").json()
+    assert status["engine"] == "ready"
+    assert any("Medium" in item for item in status["missing"])  # fake engine folder has no models
+    assert "install.bat" in status["missing_fix"]
     catalog = client.get("/api/catalog").json()
     assert {m["key"] for m in catalog["models"]} == {"sa3-sfx", "sa3-medium", "f1-samples", "f1-keybeds",
                                                       "sa3-sfx-base", "sa3-music-base"}

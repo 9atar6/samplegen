@@ -3,14 +3,19 @@
 import { api } from "./api.js";
 
 const ctx = new (window.AudioContext || window.webkitAudioContext)();
-const buffers = new Map(); // sampleId -> Promise<AudioBuffer>
+const buffers = new Map(); // sampleId -> Promise<AudioBuffer>, least recently used first
+const MAX_BUFFERS = 24; // decoded audio is big (a 10 s stereo take is ~3.5 MB)
 const listeners = new Set();
 
 let current = null; // { id, source, startedAt, offset, loop, duration }
 
 // `id` is a cache key: a sample id, or e.g. "src:<id>" with an explicit url.
 export function loadBuffer(id, url = api.audioUrl(id)) {
-  if (!buffers.has(id)) {
+  if (buffers.has(id)) {
+    const cached = buffers.get(id);
+    buffers.delete(id); // re-insert: most recently used
+    buffers.set(id, cached);
+  } else {
     const promise = fetch(url)
       .then((r) => {
         if (!r.ok) throw new Error(`audio ${r.status}`);
@@ -19,6 +24,8 @@ export function loadBuffer(id, url = api.audioUrl(id)) {
       .then((data) => ctx.decodeAudioData(data));
     promise.catch(() => buffers.delete(id)); // allow retry after a failure
     buffers.set(id, promise);
+    // A playing sound keeps its own reference, so evicting it here never cuts playback.
+    if (buffers.size > MAX_BUFFERS) buffers.delete(buffers.keys().next().value);
   }
   return buffers.get(id);
 }

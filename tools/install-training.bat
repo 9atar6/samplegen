@@ -32,7 +32,8 @@ if exist "%TRAINER%\pyproject.toml" (
   del "%ROOT%trainer\sa3.zip"
 )
 
-echo [2/6] Python + CUDA PyTorch for training (several GB, takes a while)...
+echo [2/6] Python + CUDA PyTorch for training (several GB)...
+echo       10-30 minutes depending on your connection, with nothing moving on screen. That's normal.
 cd /d "%TRAINER%"
 rem Order matters: `uv sync` creates the environment with the Python version the project pins
 rem (.python-version) and would DELETE an environment made with another version, torch included.
@@ -68,21 +69,43 @@ if exist "%USERPROFILE%\.cache\huggingface\token" (
 )
 
 echo.
-echo [4/6] Accept the Stable Audio 3 license (four browser tabs are opening).
-echo       On each page, log in to Hugging Face (free account) and agree at the top of the page.
-echo       The trainer needs the -base models AND the regular ones (for their text encoder).
+echo [4/6] Accept the Stable Audio 3 license (free) on Hugging Face
+echo       -------------------------------------------------------------------
+echo       Stability AI asks everyone to accept its license before downloading
+echo       the training models. Four browser tabs are about to open.
+echo.
+echo       a. No Hugging Face account yet? Click "Sign Up" (free) and confirm your email.
+echo          Already have one? Click "Log In".
+echo       b. On EACH of the four tabs, look near the top of the page for a box titled
+echo          like "You need to agree to share your contact information to access this
+echo          model". Fill in the fields and click the button under it ("Agree and access
+echo          repository"). Don't see the box? Log in first, then reload the page (F5).
+echo          If the page says "You have been granted access", that tab is done.
+echo       -------------------------------------------------------------------
+echo       Press any key to open the four tabs.
+pause >nul
 start "" "https://huggingface.co/stabilityai/stable-audio-3-small-sfx-base"
 start "" "https://huggingface.co/stabilityai/stable-audio-3-small-music-base"
 start "" "https://huggingface.co/stabilityai/stable-audio-3-small-sfx"
 start "" "https://huggingface.co/stabilityai/stable-audio-3-small-music"
-echo       When you have accepted ALL FOUR, come back here.
-pause
+echo.
+echo       When ALL FOUR tabs say you have access, come back here and press any key.
+pause >nul
 
 echo.
-echo [5/6] Log in to Hugging Face from this window.
-echo       A tab with your tokens opens: create a token with "Read" access and copy it.
-echo       Then paste it below (right-click pastes; it stays hidden) and press Enter.
-echo       Answer "n" if it asks about git credentials.
+echo [5/6] Connect this PC to your Hugging Face account
+echo       -------------------------------------------------------------------
+echo       A tab with your access tokens is opening:
+echo       a. Click "Create new token".
+echo       b. At the top, choose the "Read" token type, give it any name
+echo          (e.g. samplegen), click "Create token".
+echo       c. Click "Copy" next to the token (it starts with hf_).
+echo       d. Come back to this window, RIGHT-CLICK to paste it where it says
+echo          "Enter your token", then press Enter. Nothing appears while you
+echo          paste: that's normal, it's hidden on purpose.
+echo       e. If it asks "Add token as git credential? (Y/n)", type n and press Enter.
+echo       The token stays on this PC only.
+echo       -------------------------------------------------------------------
 start "" "https://huggingface.co/settings/tokens"
 if exist "%TRAINER%\.venv\Scripts\hf.exe" (
   "%TRAINER%\.venv\Scripts\hf.exe" auth login || goto :fail
@@ -92,7 +115,7 @@ if exist "%TRAINER%\.venv\Scripts\hf.exe" (
 
 :download
 echo.
-echo [6/6] Downloading the trainer's models (checks your access)...
+echo [6/6] Downloading the trainer's models (a few GB, also checks your access)...
 cd /d "%TRAINER%"
 "%PY%" -c "from stable_audio_3.model_configs import base_models; [print(n, base_models[n].resolve()) for n in ('small-sfx-base', 'small-music-base')]" >> "%LOG%" 2>&1 || goto :noaccess
 rem Training also loads the text encoder from the regular (non-base) repos: check those too.
@@ -101,7 +124,8 @@ cd /d "%ROOT%"
 
 echo TRAINING SETUP OK >> "%LOG%"
 echo.
-echo   Style training is ready: open the Train tab in samplegen.
+echo   Style training is ready. In samplegen, open the Train tab: name your style,
+echo   add 20-50 sounds, press Auto-describe, then Start. It takes about 15 minutes.
 if /i not "%~1"=="nopause" pause
 exit /b 0
 

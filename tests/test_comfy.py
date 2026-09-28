@@ -54,6 +54,27 @@ def test_wait_raises_engine_error_with_node_message():
         ComfyClient("http://x", opener).wait("p1", timeout=10, poll=0, sleep=lambda s: None)
 
 
+def test_wait_gives_up_at_once_on_prompts_dropped_by_clear_queue():
+    # An instrument queues all its passes up front; cancel clears the queue, so the
+    # remaining passes never reach the history. wait() must not poll them until the timeout.
+    opener, calls = opener_for([{"prompt_id": "p2"}, {}, {}])
+    client = ComfyClient("http://x", opener)
+    client.submit({"a": 1})
+    client.clear_queue()
+    with pytest.raises(EngineError, match="cancelled"):
+        client.wait("p2", timeout=900, poll=0, sleep=lambda s: None)
+    assert len(calls) == 3  # submit, clear, one history check
+
+
+def test_prompts_submitted_after_a_clear_are_waited_for_normally():
+    done = {"p3": {"status": {"completed": True}, "outputs": {}}}
+    opener, _ = opener_for([{}, {"prompt_id": "p3"}, {}, done])
+    client = ComfyClient("http://x", opener)
+    client.clear_queue()
+    client.submit({"a": 1})
+    assert client.wait("p3", timeout=10, poll=0, sleep=lambda s: None) == []
+
+
 def test_wait_times_out():
     opener, _ = opener_for([{}] * 1000)
     with pytest.raises(EngineError, match="timed out"):

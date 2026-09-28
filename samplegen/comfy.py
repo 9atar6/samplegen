@@ -30,6 +30,10 @@ class ComfyClient:
     def __init__(self, base_url: str, opener: Opener = urllib.request.urlopen):
         self.base_url = base_url.rstrip("/")
         self._open = opener
+        # Prompts dropped by clear_queue() never reach the history: remember which
+        # "clear" each prompt was submitted after, so wait() can give up on them at once.
+        self._clears = 0
+        self._submitted_after: dict[str, int] = {}
 
     def _request(self, path: str, payload: dict | None = None, timeout: float = REQUEST_TIMEOUT_SECONDS):
         data = json.dumps(payload).encode() if payload is not None else None
@@ -56,7 +60,9 @@ class ComfyClient:
 
     def submit(self, graph: dict) -> str:
         try:
-            return self._request("/prompt", {"prompt": graph})["prompt_id"]
+            prompt_id = self._request("/prompt", {"prompt": graph})["prompt_id"]
+            self._submitted_after[prompt_id] = self._clears
+            return prompt_id
         except EngineError as exc:
             if "does not exist" in str(exc):
                 raise EngineError(
@@ -76,6 +82,7 @@ class ComfyClient:
     def clear_queue(self) -> None:
         """Drop prompts that haven't started (e.g. the remaining passes of an instrument)."""
         self._request("/queue", {"clear": True})
+        self._clears += 1
 
     def free_memory(self) -> None:
         self._request("/free", {"unload_models": True, "free_memory": True})
@@ -83,20 +90,26 @@ class ComfyClient:
     def wait(self, prompt_id: str, timeout: float, poll: float = POLL_SECONDS,
              sleep: Callable[[float], None] = time.sleep) -> list[OutputFile]:
         deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            entry = self._request(f"/history/{prompt_id}").get(prompt_id)
-            if entry:
-                status = entry.get("status", {})
-                if status.get("status_str") == "error":
-                    raise EngineError(_describe_error(status))
-                if status.get("completed"):
-                    return [
-                        OutputFile(f["filename"], f.get("subfolder", ""))
-                        for out in entry.get("outputs", {}).values()
-                        for f in out.get("samplegen_wavs", [])
-                    ]
-            sleep(poll)
-        raise EngineError(f"generation {prompt_id} timed out after {timeout:.0f}s")
+        submitted_after = self._submitted_after.get(prompt_id, self._clears)
+        try:
+            while time.monotonic() < deadline:
+                entry = self._request(f"/history/{prompt_id}").get(prompt_id)
+                if entry:
+                    status = entry.get("status", {})
+                    if status.get("status_str") == "error":
+                        raise EngineError(_describe_error(status))
+                    if status.get("completed"):
+                        return [
+                            OutputFile(f["filename"], f.get("subfolder", ""))
+                            for out in entry.get("outputs", {}).values()
+                            for f in out.get("samplegen_wavs", [])
+                        ]
+                elif self._clears != submitted_after:
+                    raise EngineError("cancelled")
+                sleep(poll)
+            raise EngineError(f"generation {prompt_id} timed out after {timeout:.0f}s")
+        finally:
+            self._submitted_after.pop(prompt_id, None)
 
 
 def _describe_error(status: dict) -> str:

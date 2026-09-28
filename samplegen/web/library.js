@@ -19,7 +19,10 @@ async function refreshTags() {
   } catch { /* keep whatever is there */ }
 }
 
+let latestLoad = 0; // only the newest request may render (filters can change mid-request)
+
 export async function loadLibrary() {
+  const ticket = ++latestLoad;
   const filter = state.filter;
   const params = filter === "favorites" ? { favorite: true } : { status: filter };
   const q = $("#lib-search").value.trim();
@@ -32,10 +35,12 @@ export async function loadLibrary() {
   try {
     records = await api.samples(params);
   } catch (err) {
+    if (ticket !== latestLoad) return;
     $("#lib-empty").textContent = err.message;
     $("#lib-empty").hidden = false;
     return;
   }
+  if (ticket !== latestLoad) return; // a newer search/filter is on its way
   for (const el of list.querySelectorAll(".sample")) removeRow(el.dataset.id);
   const matches = (r) => (filter === "favorites" ? r.favorite && r.status !== "trashed" : r.status === filter)
     && (!tag || (r.tags || []).includes(tag));

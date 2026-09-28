@@ -102,6 +102,8 @@ def add_extra_routes(app: FastAPI, ctx) -> None:
             result = export_pack(ctx.library, records, body.name, fmt)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        except OSError as exc:  # disk full, drive unplugged, same pack exported twice at once...
+            raise HTTPException(500, f"Could not write the pack: {exc}") from exc
         if body.reveal:
             open_in_explorer(result.folder)
         return result.to_dict()

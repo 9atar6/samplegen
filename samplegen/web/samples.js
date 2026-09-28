@@ -4,9 +4,11 @@ import { api } from "./api.js";
 import { icon, iconButton } from "./icons.js";
 import * as player from "./player.js";
 import { toast } from "./toast.js";
-import { drawWaveform } from "./waveform.js";
+import { drawWaveform, forgetPeaks } from "./waveform.js";
 
-const rows = new Map(); // sampleId -> { el, record, canvas, buffer }
+// Rows don't keep their decoded audio: the waveform is drawn from cached peaks, and the
+// audio itself lives in the player's small LRU cache, so memory stays flat in long sessions.
+const rows = new Map(); // sampleId -> { el, record, canvas, duration, loading }
 
 const observer = new IntersectionObserver((entries) => {
   for (const entry of entries) {
@@ -86,18 +88,24 @@ function fileName(record) {
 
 async function loadWave(id) {
   const row = rows.get(id);
-  if (!row) return;
+  if (!row || row.loading) return;
+  row.loading = true;
   try {
-    row.buffer = await player.loadBuffer(id);
-    redraw(id);
+    const buffer = await player.loadBuffer(id);
+    row.duration = buffer.duration;
+    if (row.el.isConnected) drawWaveform(row.canvas, id, buffer, player.progress(id));
   } catch {
     row.el.classList.add("broken");
+  } finally {
+    row.loading = false;
   }
 }
 
 export function redraw(id) {
   const row = rows.get(id);
-  if (row && row.buffer && row.el.isConnected) drawWaveform(row.canvas, id, row.buffer, player.progress(id));
+  if (!row || row.duration == null || !row.el.isConnected) return;
+  // No peaks for this width yet (e.g. after a resize): fetch the audio again to compute them.
+  if (!drawWaveform(row.canvas, id, null, player.progress(id))) loadWave(id);
 }
 
 export function createSampleRow(record, { onChange } = {}) {
@@ -130,7 +138,7 @@ export function createSampleRow(record, { onChange } = {}) {
   actions.append(favBtn, keepBtn, trashBtn, editBtn, sourceBtn, stemsBtn, revealBtn);
   el.append(playBtn, canvas, info, actions);
 
-  const row = { el, record, canvas, buffer: null };
+  const row = { el, record, canvas, duration: null, loading: false };
   rows.set(record.id, row);
 
   const render = () => {
@@ -182,7 +190,7 @@ export function createSampleRow(record, { onChange } = {}) {
   canvas.addEventListener("click", (e) => {
     const rect = canvas.getBoundingClientRect();
     const fraction = (e.clientX - rect.left) / rect.width;
-    const duration = row.buffer ? row.buffer.duration : 0;
+    const duration = row.duration || 0;
     player.play(record.id, { offset: fraction * duration, loop: isLooping(row.record) });
     el.focus();
   });
@@ -205,8 +213,11 @@ export function removeRow(id) {
   if (player.isPlaying(id)) player.stop();
   const next = row.el.nextElementSibling;
   if (next && next.classList.contains("sample-editor")) next.remove();
+  observer.unobserve(row.el);
   row.el.remove();
   rows.delete(id);
+  player.forget(id);
+  forgetPeaks(id);
 }
 
 // Redraw the playing row every frame; update play buttons on start/stop.

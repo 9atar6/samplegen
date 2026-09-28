@@ -2,7 +2,12 @@
 
 const BAR = 2;   // bar width in CSS px
 const GAP = 1;   // gap between bars in CSS px
-const peakCache = new Map(); // `${id}:${bars}` -> Float32Array [min,max,...]
+const peakCache = new Map(); // `${id}:${bars}` -> Float32Array [min,max,...], oldest first
+const MAX_PEAK_ENTRIES = 1500; // a few KB each
+
+export function forgetPeaks(id) {
+  for (const key of [...peakCache.keys()]) if (key.startsWith(`${id}:`)) peakCache.delete(key);
+}
 
 export function computePeaks(buffer, columns) {
   const channels = [];
@@ -32,6 +37,7 @@ function cssVar(el, name) {
   return getComputedStyle(el).getPropertyValue(name).trim();
 }
 
+// Returns false (and draws nothing) when `buffer` is null and no peaks are cached for this size.
 export function drawWaveform(canvas, id, buffer, progress) {
   const dpr = window.devicePixelRatio || 1;
   const width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
@@ -44,7 +50,11 @@ export function drawWaveform(canvas, id, buffer, progress) {
   const pitch = (BAR + GAP) * dpr;
   const bars = Math.max(1, Math.floor(width / pitch));
   const key = `${id}:${bars}`;
-  if (!peakCache.has(key)) peakCache.set(key, computePeaks(buffer, bars));
+  if (!peakCache.has(key)) {
+    if (!buffer) return false;
+    peakCache.set(key, computePeaks(buffer, bars));
+    if (peakCache.size > MAX_PEAK_ENTRIES) peakCache.delete(peakCache.keys().next().value);
+  }
   const peaks = peakCache.get(key);
 
   // Normalise the drawing so quiet sounds are still readable (display only).
@@ -83,4 +93,5 @@ export function drawWaveform(canvas, id, buffer, progress) {
     g.fillRect(Math.min(played, width - dpr), 0, Math.max(1, 1.5 * dpr), height);
     g.shadowBlur = 0;
   }
+  return true;
 }

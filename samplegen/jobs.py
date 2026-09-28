@@ -45,6 +45,7 @@ class JobManager:
         self.busy = busy or (lambda: None)
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self._cancelling: set[str] = set()  # running jobs the user cancelled
         self._queue: queue.Queue[str | None] = queue.Queue()
         self._worker: threading.Thread | None = None
 
@@ -80,11 +81,16 @@ class JobManager:
             return sorted(self._jobs.values(), key=lambda j: j.created, reverse=True)
 
     def cancel(self, job_id: str) -> Job | None:
-        job = self.get(job_id)
-        if job is None:
-            return None
-        if job.state == "queued":
-            return self._set(job_id, state="cancelled", finished=time.time())
+        with self._lock:  # check-and-set in one step: the worker may be picking this job up
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if job.state == "queued":
+                job = replace(job, state="cancelled", finished=time.time())
+                self._jobs[job_id] = job
+                return job
+            if job.state == "running":
+                self._cancelling.add(job_id)
         if job.state == "running":
             try:
                 if hasattr(self.generator.client, "clear_queue"):
@@ -116,10 +122,25 @@ class JobManager:
             self.run_now(job_id)
 
     def run_now(self, job_id: str) -> Job:
-        job = self._set(job_id, state="running", started=time.time())
+        with self._lock:
+            job = self._jobs[job_id]
+            if job.state != "queued":  # cancelled between the queue and here
+                return job
+            job = replace(job, state="running", started=time.time())
+            self._jobs[job_id] = job
         try:
             records = self.generator.run(job.request, job.id)
         except Exception as exc:
+            if self._was_cancelled(job_id):
+                return self._set(job_id, state="cancelled", finished=time.time())
             log.exception("job %s failed", job_id)
             return self._set(job_id, state="error", error=str(exc) or type(exc).__name__, finished=time.time())
+        self._was_cancelled(job_id)  # finished before the interrupt landed: keep the result
         return self._set(job_id, state="done", sample_ids=tuple(r.id for r in records), finished=time.time())
+
+    def _was_cancelled(self, job_id: str) -> bool:
+        with self._lock:
+            if job_id in self._cancelling:
+                self._cancelling.discard(job_id)
+                return True
+            return False

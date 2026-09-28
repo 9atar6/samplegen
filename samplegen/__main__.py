@@ -4,6 +4,7 @@
 """
 
 import logging
+import socket
 import sys
 import threading
 import webbrowser
@@ -26,9 +27,22 @@ from .training import TrainingManager
 log = logging.getLogger("samplegen")
 
 
+def port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = load_settings()
+    url = f"http://127.0.0.1:{settings.app_port}/"
+
+    if port_in_use(settings.app_port):
+        print(f"\nsamplegen is already running (or something else uses port {settings.app_port}).")
+        print(f"Opening {url} - close this window.")
+        webbrowser.open(url)
+        return 0
 
     if not Path(settings.library_dir.anchor).exists():
         print(f"\nThe sample library location {settings.library_dir} is not available.")
@@ -62,7 +76,6 @@ def main() -> int:
 
     threading.Thread(target=warm_up, name="engine-start", daemon=True).start()
 
-    url = f"http://127.0.0.1:{settings.app_port}/"
     threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     print(f"\n  samplegen is running at {url}\n  Library: {settings.library_dir}\n  Close this window to quit.\n")
     try:

@@ -30,6 +30,7 @@ class FakeEngine:
         self.state = "ready"
         self.error = None
         self.calls = 0
+        self.engine_dir = Path("no-engine-here")
 
     def ensure_running(self):
         self.calls += 1

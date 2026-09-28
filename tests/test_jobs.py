@@ -62,6 +62,26 @@ def test_cancel_queued_and_running():
     assert manager.cancel("missing") is None
 
 
+def test_cancelled_running_job_ends_as_cancelled_not_error():
+    class Interrupted(StubGenerator):
+        def run(self, request, job_id):
+            manager.cancel(job_id)  # the user presses Stop while it runs
+            raise RuntimeError("cancelled")
+
+    manager = JobManager(Interrupted())
+    job = manager.submit(req())
+    ended = manager.run_now(job.id)
+    assert ended.state == "cancelled" and ended.error is None
+
+
+def test_job_cancelled_before_the_worker_starts_it_never_runs():
+    generator = StubGenerator(fail=AssertionError("must not run"))
+    manager = JobManager(generator)
+    job = manager.submit(req())
+    manager.cancel(job.id)
+    assert manager.run_now(job.id).state == "cancelled"
+
+
 def test_worker_thread_processes_queue():
     manager = JobManager(StubGenerator())
     manager.start()

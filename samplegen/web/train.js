@@ -218,6 +218,7 @@ async function start(e) {
   e.preventDefault();
   showError("");
   const clips = state.clips.filter((c) => c.include);
+  if (!clips.length) return showError("Select at least one sound (tick the boxes in the list).");
   if (clips.some((c) => !c.caption.trim())) return showError("Every selected sound needs a description.");
   const body = {
     name: $("#train-name").value.trim(),

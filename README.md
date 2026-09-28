@@ -8,16 +8,28 @@ no subscription, no upload.
 **You need:** Windows 10/11, an **NVIDIA GPU with 8 GB+ VRAM**, about **40 GB** free disk, internet for
 the first install.
 
-1. Get this folder (GitHub → **Code → Download ZIP**, then unzip it somewhere with space, e.g. `C:\AI\samplegen`).
-2. Double-click **`install.bat`**. It downloads the engine (ComfyUI), the models (~20 GB) and everything else
-   into this folder, and asks where to save your samples. It's safe to run again at any time: finished steps
-   are skipped, so it also works as a *repair*.
-3. Double-click **`samplegen.bat`**. The app opens in your browser (http://127.0.0.1:8190). Close the black
-   window to quit.
+1. Get this folder (GitHub → **Code → Download ZIP**, then right-click the ZIP → **Extract All…**) somewhere
+   with space, e.g. `C:\AI\samplegen`.
+2. Double-click **`install.bat`** and follow what it says. It checks your disk space and GPU, downloads the
+   engine (ComfyUI) and the models (~20 GB, 30–90 min), asks where to save your samples, and offers a desktop
+   shortcut. Safe to run again at any time: finished steps are skipped, so it also works as a *repair*.
+3. Double-click **`samplegen.bat`** (or the shortcut). The app opens in your browser
+   (http://127.0.0.1:8190); the first start takes about a minute. Close the black window to quit.
 
 **Style training** (optional, teach samplegen your own sounds) also needs a free
 [Hugging Face](https://huggingface.co) account. `install.bat` offers to set it up; you can also run
-`tools\install-training.bat` later.
+`tools\install-training.bat` later. It walks you through accepting the license and logging in.
+
+### If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| A Windows security warning when opening a `.bat` | Files from a downloaded ZIP get flagged: click **Run** (or **More info → Run anyway**). |
+| The installer says **Something went wrong** | Check internet and disk space, run `install.bat` again: it resumes. Details in `logs\install.log`. |
+| A red **Install not finished** bar in the app | A model or extension is missing: run `install.bat` again. |
+| **The sample library location is not available** | Your library drive is unplugged: plug it in, or delete `samplegen.local.json` and run `install.bat` to pick another folder. |
+| The top-right light stays red (**Engine error**) | Hover it for the reason; the full log is `logs\engine.log`. Restarting samplegen usually fixes it. |
+| **Out of memory** errors | Shorter sounds, fewer variations, or the Small SFX model. Close games / other GPU apps. |
 
 ## What it does
 
@@ -107,6 +119,7 @@ $1M annual revenue), ComfyUI (GPL-3.0), AudioSeparation (GPL-3.0), CLAP (Apache-
 ## Development
 
 Double-click **`tools\run-tests.bat`** (results also go to `logs\test-results.txt`).
+(pytest comes with the `dev` dependency group, which `uv sync` / `install.bat` install by default.)
 
 > Don't run pytest through an AI agent's sandboxed shell on this PC: directory scans inside that
 > sandbox trigger a Windows `bindflt.sys` blue screen. Outside the sandbox it's fine.

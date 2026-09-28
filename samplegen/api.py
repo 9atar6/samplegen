@@ -17,6 +17,8 @@ from .catalog import KEYS, LOOP_BARS, LOOP_BPMS, LOOP_TAGS, MODELS, SCALES
 from .generation_request import GenerationRequest
 from .jobs import JobManager
 from .library import Library, SampleNotFound
+from .setup_check import FIX as SETUP_FIX
+from .setup_check import missing_parts
 from .sources import MAX_UPLOAD_BYTES, SourceNotFound, SourceStore
 from .styles import StyleStore
 from .training import TrainingManager
@@ -116,7 +118,8 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     @app.get("/api/status")
     def status():
-        return {"engine": ctx.engine.state, "engine_error": ctx.engine.error, "library": str(ctx.library.root)}
+        return {"engine": ctx.engine.state, "engine_error": ctx.engine.error, "library": str(ctx.library.root),
+                "missing": missing_parts(ctx.engine.engine_dir), "missing_fix": SETUP_FIX}
 
     @app.get("/api/catalog")
     def catalog():

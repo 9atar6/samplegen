@@ -31,6 +31,10 @@
     </div>
   </header>
 
+  <div class="setup-banner" id="setup-banner" role="status" hidden>
+    <b>Install not finished.</b> <span id="setup-missing"></span> <span id="setup-fix"></span>
+  </div>
+
   <main>
     <!-- ============ GENERATE ============ -->
     <section class="view" id="view-generate">
@@ -208,6 +212,13 @@
             </svg>
             <h1 class="empty-title">Describe a sound.<br><em>Hear it in seconds.</em></h1>
             <p class="empty-sub">Pick a mode on the left, type what you hear in your head, press <b>Generate</b>. Every take lands here, ready to audition, keep, or drag into your DAW.</p>
+            <div class="try" id="try-prompts">
+              <span class="try-label">Try one</span>
+              <button type="button" class="chip" data-prompt="Heavy metal door slam in a large empty warehouse, long reverb tail">metal door slam</button>
+              <button type="button" class="chip" data-prompt="Deep cinematic sub boom impact with a distorted low end">cinematic boom</button>
+              <button type="button" class="chip" data-prompt="Fast sci-fi laser whoosh passing from left to right">laser whoosh</button>
+              <button type="button" class="chip" data-prompt="Soft rain on a tent with distant thunder">rain on a tent</button>
+            </div>
             <ul class="legend">
               <li><kbd>Space</kbd>play</li>
               <li><kbd>↑</kbd><kbd>↓</kbd>move</li>

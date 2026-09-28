@@ -358,7 +358,13 @@ function showFormError(message) {
 }
 
 // ---------- submitting ----------
+// While a request is on its way, a second click / Ctrl+Enter is a double-click, not a new batch.
+let submitting = false;
+const splitting = new Set();
+
 async function submit(body) {
+  if (submitting) return;
+  submitting = true;
   showFormError("");
   let job;
   try {
@@ -371,6 +377,8 @@ async function submit(body) {
   } catch (err) {
     showFormError(err.message);
     return;
+  } finally {
+    submitting = false;
   }
   track(job, () => submit({ ...body, seed: null }));
 }
@@ -388,12 +396,16 @@ async function useSampleAsSource(record) {
 }
 
 async function splitStems(record) {
+  if (splitting.has(record.id)) return;
+  splitting.add(record.id);
   showView("generate");
   try {
     track(await api.stems(record.id, exportFormat()));
     toast(`Splitting “${record.name}” into stems…`);
   } catch (err) {
     toast(err.message, "error");
+  } finally {
+    splitting.delete(record.id);
   }
 }
 
@@ -453,6 +465,10 @@ async function pollStatus() {
     const labels = { ready: "Engine ready", starting: "Engine starting…", stopped: "Engine idle", error: "Engine error" };
     pill.querySelector(".label").textContent = labels[s.engine] || s.engine;
     pill.title = s.engine_error || `Library: ${s.library}`;
+    const missing = s.missing || [];
+    $("#setup-banner").hidden = missing.length === 0;
+    $("#setup-missing").textContent = missing.length ? `Missing: ${missing.join(" · ")}.` : "";
+    $("#setup-fix").textContent = s.missing_fix || "";
   } catch {
     pill.dataset.state = "error";
     pill.querySelector(".label").textContent = "App offline";
@@ -501,6 +517,14 @@ async function init() {
   });
   $("#style").addEventListener("change", () => { syncStyleField(); saveForm(); });
   initTrain();
+  for (const chip of document.querySelectorAll("#try-prompts .chip")) {
+    chip.addEventListener("click", () => {
+      if (state.mode !== "sfx") setMode("sfx");
+      $("#prompt").value = chip.dataset.prompt;
+      $("#prompt").dispatchEvent(new Event("input", { bubbles: true }));
+      $("#prompt").focus();
+    });
+  }
 
   $("#model").addEventListener("change", () => { onModelChange(); saveForm(); });
   $("#prompt").addEventListener("input", syncTagChips);
