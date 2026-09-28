@@ -1,0 +1,20 @@
+# Python / tooling
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Installed or downloaded by install.bat (large, per machine)
+engine/
+trainer/stable-audio-3/
+trainer/*.zip
+
+# Per-machine settings and runtime output
+samplegen.local.json
+logs/
+
+# Audio never belongs in the repo (the library lives outside it)
+*.wav
+*.part

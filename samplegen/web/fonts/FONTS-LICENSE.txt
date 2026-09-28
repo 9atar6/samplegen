@@ -1,0 +1,9 @@
+Fonts bundled with samplegen (latin subsets, from Google Fonts), all under the
+SIL Open Font License 1.1: https://openfontlicense.org
+
+  Doto              (c) The Doto Project Authors
+  Hanken Grotesk    (c) The Hanken Grotesk Project Authors
+  Instrument Serif  (c) The Instrument Serif Project Authors
+  Martian Mono      (c) The Martian Mono Project Authors (Evil Martians)
+
+The fonts may be used, embedded and redistributed with software; they may not be sold on their own.

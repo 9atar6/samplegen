@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>samplegen</title>
+  <meta name="color-scheme" content="light dark">
+  <link rel="preload" href="fonts/hanken-grotesk.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/doto.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Apply the saved finish before first paint (no flash).
+    try { const t = localStorage.getItem("samplegen.theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand" aria-label="samplegen">
+      <span class="brand-mark">SAMPLE<b>GEN</b></span>
+      <span class="brand-model">SG-1 · local sample generator</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <span class="tab-ink" aria-hidden="true"></span>
+      <button class="tab active" data-view="generate" role="tab"><span data-icon="spark"></span>Generate</button>
+      <button class="tab" data-view="library" role="tab"><span data-icon="folder"></span>Library</button>
+      <button class="tab" data-view="train" role="tab"><span data-icon="wave"></span>Train</button>
+    </nav>
+    <div class="topbar-right">
+      <div class="engine-pill" id="engine-pill" title="Engine status"><span class="dot"></span><span class="label">Engine…</span></div>
+      <button type="button" class="icon theme-toggle" id="theme-toggle" title="Switch finish (bone / graphite)" aria-label="Switch light or dark finish"><span data-icon="moon"></span></button>
+    </div>
+  </header>
+
+  <main>
+    <!-- ============ GENERATE ============ -->
+    <section class="view" id="view-generate">
+      <form class="deck" id="gen-form" autocomplete="off">
+        <div class="deck-scroll">
+          <section class="deck-section">
+            <h2 class="deck-label"><span>01</span>Mode</h2>
+            <div class="keys" id="mode-switch">
+              <button type="button" class="key active" data-mode="sfx" title="Sound effects and one-shots from text"><span data-icon="bolt"></span><b>SFX</b><small>one-shots</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="loop" title="Tempo- and key-locked musical loops"><span data-icon="loop"></span><b>Loop</b><small>bpm · key</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="free" title="Textures, drones, long musical material"><span data-icon="drone"></span><b>Free</b><small>textures</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="transform" title="Turn a sound you have into something new"><span data-icon="shuffle"></span><b>Transform</b><small>your audio</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="edit" title="Regenerate part of a sound, or extend it"><span data-icon="scissors"></span><b>Edit</b><small>inpaint</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="instrument" title="A playable sampler instrument across the keyboard"><span data-icon="keys"></span><b>Instrument</b><small>sampler</small><i class="led"></i></button>
+            </div>
+          </section>
+
+          <section class="deck-section" id="source-panel" hidden>
+            <h2 class="deck-label"><span>··</span>Source</h2>
+            <div id="source-drop" class="dropzone" tabindex="0" role="button">
+              <span data-icon="upload"></span>
+              <b>Drop a sound here</b>
+              <small>or click to browse · WAV AIFF FLAC OGG MP3 · or <span class="inline-glyph" data-icon="swap"></span> on any sample</small>
+            </div>
+            <input type="file" id="source-file" accept="audio/*,.wav,.aif,.aiff,.flac,.ogg,.mp3" hidden>
+            <div id="source-loaded" class="source-loaded" hidden>
+              <div class="source-head">
+                <button type="button" class="icon play" id="source-play" title="Play source" aria-label="Play source"></button>
+                <div class="info">
+                  <div class="name" id="source-name"></div>
+                  <div class="meta" id="source-meta"></div>
+                </div>
+                <button type="button" class="icon" id="source-clear" title="Remove source" aria-label="Remove source"><span data-icon="x"></span></button>
+              </div>
+              <div class="screen-inset"><canvas id="source-wave" class="wave source-wave"></canvas></div>
+              <small class="hint" id="selection-label" hidden></small>
+            </div>
+            <p class="hint" id="source-status" hidden></p>
+
+            <div id="transform-fields" hidden>
+              <label class="field">
+                <span>Strength <output id="strength-out">0.60</output></span>
+                <input type="range" id="strength" min="0.05" max="1" step="0.05" value="0.6">
+                <small class="range-ends"><span>subtle</span><span>total</span></small>
+              </label>
+              <label class="check"><input type="checkbox" id="source-loop"><span>Source is a loop — keep it seamless</span></label>
+            </div>
+
+            <div id="edit-fields" hidden>
+              <div class="segmented" id="edit-op-switch">
+                <button type="button" data-op="inpaint" class="active">Regenerate selection</button>
+                <button type="button" data-op="extend">Extend</button>
+              </div>
+              <label class="field" id="extend-field" hidden>
+                <span>Add <output id="extend-out">4.0 s</output></span>
+                <input type="range" id="extend" min="0.5" max="30" step="0.5" value="4">
+              </label>
+            </div>
+          </section>
+
+          <section class="deck-section">
+            <h2 class="deck-label"><span>02</span>Sound</h2>
+            <label class="field" id="prompt-field">
+              <span id="prompt-label">Describe the sound</span>
+              <div class="screen-inset prompt-screen">
+                <textarea id="prompt" rows="4" maxlength="2000" placeholder="heavy metal door slam in a concrete hallway, long reverb tail"></textarea>
+              </div>
+            </label>
+
+            <div id="loop-fields" hidden>
+              <div class="row3">
+                <label class="field"><span>BPM</span><select id="bpm"></select></label>
+                <label class="field"><span>Bars</span><select id="bars"></select></label>
+                <label class="field"><span>Key</span><select id="key"></select></label>
+              </div>
+              <div class="segmented" id="scale-switch">
+                <button type="button" data-scale="minor" class="active">Minor</button>
+                <button type="button" data-scale="major">Major</button>
+              </div>
+            </div>
+
+            <div id="instrument-fields" hidden>
+              <label class="field"><span>Instrument name <em>optional</em></span><input id="instrument-name" maxlength="80" placeholder="Gritty Grand"></label>
+              <div class="row2">
+                <label class="field"><span>Lowest note</span><select id="low-note"></select></label>
+                <label class="field"><span>Highest note</span><select id="high-note"></select></label>
+              </div>
+              <div class="segmented" id="space-switch">
+                <button type="button" data-space="Dry" class="active">Dry</button>
+                <button type="button" data-space="Wet">Wet · reverb &amp; FX</button>
+              </div>
+              <small class="hint lcd-hint" id="instrument-estimate"></small>
+            </div>
+
+            <div id="tag-groups" class="tag-groups" hidden></div>
+
+            <div class="row-model">
+              <label class="field">
+                <span>Model</span>
+                <select id="model"></select>
+              </label>
+              <small id="model-desc" class="hint"></small>
+            </div>
+
+            <div id="style-field" hidden>
+              <label class="field">
+                <span>Style <em>trained on your sounds</em></span>
+                <select id="style"><option value="">None — stock model</option></select>
+                <small class="hint" id="style-hint"></small>
+              </label>
+              <label class="field" id="style-strength-field" hidden>
+                <span>Style strength <output id="style-strength-out">1.00</output></span>
+                <input type="range" id="style-strength" min="0" max="2" step="0.05" value="1">
+              </label>
+            </div>
+          </section>
+
+          <section class="deck-section" id="shape-section">
+            <h2 class="deck-label"><span>03</span>Shape</h2>
+            <label class="field" id="duration-field">
+              <span>Length <output id="duration-out">4.0 s</output></span>
+              <input type="range" id="duration" min="0.5" max="30" step="0.5" value="4">
+            </label>
+            <label class="field" id="variations-field">
+              <span>Variations <output id="variations-out">4</output></span>
+              <input type="range" id="variations" min="1" max="8" step="1" value="4">
+            </label>
+          </section>
+
+          <details class="deck-section advanced">
+            <summary class="deck-label"><span>04</span>Output &amp; advanced <i class="chev" aria-hidden="true"></i></summary>
+            <div class="advanced-body">
+              <label class="field"><span>Avoid <em>negative prompt</em></span><input id="negative" maxlength="2000" placeholder="music, voice, distortion"></label>
+              <label class="field"><span>Seed <em>blank = random</em></span><input id="seed" inputmode="numeric" pattern="[0-9]*" placeholder="random"></label>
+              <div class="row2 align-end">
+                <label class="check"><input type="checkbox" id="normalize" checked><span>Normalize</span></label>
+                <label class="field inline"><input type="number" id="normalize-db" value="-1" min="-30" max="0" step="0.5"><em>dBFS</em></label>
+              </div>
+              <label class="check" id="trim-field"><input type="checkbox" id="trim" checked><span>Trim silence on one-shots</span></label>
+              <div class="row2">
+                <label class="field"><span>Fade in <em>ms</em></span><input type="number" id="fade-in" value="0" min="0" max="5000"></label>
+                <label class="field"><span>Fade out <em>ms</em></span><input type="number" id="fade-out" value="5" min="0" max="5000"></label>
+              </div>
+              <div class="row2">
+                <label class="field"><span>Sample rate</span>
+                  <select id="export-rate"><option value="44100">44.1 kHz · native</option><option value="48000">48 kHz</option><option value="96000">96 kHz</option></select>
+                </label>
+                <label class="field"><span>Bit depth</span>
+                  <select id="export-bits"><option value="32f">32-bit float</option><option value="24">24-bit</option><option value="16">16-bit</option></select>
+                </label>
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <div class="deck-foot">
+          <p class="form-error" id="form-error" role="alert" hidden></p>
+          <button type="submit" class="primary" id="generate-btn"><span data-icon="spark"></span><span>Generate</span><kbd>Ctrl ↵</kbd></button>
+        </div>
+      </form>
+
+      <div class="screen">
+        <div class="feed" id="feed">
+          <div class="empty" id="feed-empty">
+            <svg class="scope" viewBox="0 0 600 120" aria-hidden="true">
+              <defs>
+                <linearGradient id="scope-grad" x1="0" x2="1">
+                  <stop offset="0" stop-color="var(--sig)" stop-opacity="0"/>
+                  <stop offset=".25" stop-color="var(--sig)"/>
+                  <stop offset=".75" stop-color="var(--sig-2)"/>
+                  <stop offset="1" stop-color="var(--sig-2)" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <path class="scope-line" d="M0 60 C 25 10, 50 10, 75 60 S 125 110, 150 60 S 200 10, 225 60 S 275 110, 300 60 S 350 10, 375 60 S 425 110, 450 60 S 500 10, 525 60 S 575 110, 600 60 S 650 10, 675 60 S 725 110, 750 60 S 800 10, 825 60 S 875 110, 900 60 S 950 10, 975 60 S 1025 110, 1050 60 S 1100 10, 1125 60 S 1175 110, 1200 60"/>
+            </svg>
+            <h1 class="empty-title">Describe a sound.<br><em>Hear it in seconds.</em></h1>
+            <p class="empty-sub">Pick a mode on the left, type what you hear in your head, press <b>Generate</b>. Every take lands here, ready to audition, keep, or drag into your DAW.</p>
+            <ul class="legend">
+              <li><kbd>Space</kbd>play</li>
+              <li><kbd>↑</kbd><kbd>↓</kbd>move</li>
+              <li><kbd>K</kbd>keep</li>
+              <li><kbd>X</kbd>trash</li>
+              <li><kbd>F</kbd>favorite</li>
+              <li><kbd>T</kbd>use as source</li>
+              <li><kbd>S</kbd>stems</li>
+              <li><kbd>E</kbd>rename · tags</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ LIBRARY ============ -->
+    <section class="view" id="view-library" hidden>
+      <div class="toolbar">
+        <div class="segmented" id="lib-filter">
+          <button type="button" data-filter="new" class="active">Inbox</button>
+          <button type="button" data-filter="kept">Kept</button>
+          <button type="button" data-filter="favorites">Favorites</button>
+          <button type="button" data-filter="trashed">Trash</button>
+        </div>
+        <label class="search"><span data-icon="search"></span><input type="search" id="lib-search" placeholder="Search names, prompts, tags…" maxlength="200"></label>
+        <select id="lib-tag" title="Filter by tag"><option value="">All tags</option></select>
+        <button type="button" class="ghost" id="pack-open" title="Export the samples shown below as a sample pack folder"><span data-icon="download"></span>Export pack</button>
+      </div>
+      <form class="pack-dialog" id="pack-dialog" hidden>
+        <div class="pack-title"><span data-icon="download"></span><b>Export as a sample pack</b><small>copies what's listed below · the library stays untouched</small></div>
+        <label class="field"><span>Pack name</span><input id="pack-name" maxlength="80" required placeholder="Dark Impacts Vol. 1"></label>
+        <label class="field"><span>Format</span>
+          <select id="pack-format">
+            <option value="">Keep files as they are</option>
+            <option value="44100:24">WAV 24-bit · 44.1 kHz</option>
+            <option value="48000:24">WAV 24-bit · 48 kHz</option>
+            <option value="44100:16">WAV 16-bit · 44.1 kHz</option>
+            <option value="44100:32f">WAV 32-bit float · 44.1 kHz</option>
+          </select>
+        </label>
+        <div class="pack-actions">
+          <button type="button" class="ghost" id="pack-cancel">Cancel</button>
+          <button type="submit" class="primary small" id="pack-export">Export <span id="pack-count"></span></button>
+        </div>
+        <p class="hint" id="pack-result" hidden></p>
+      </form>
+      <div class="screen">
+        <div class="sample-list lib-list" id="lib-list"></div>
+        <div class="empty small" id="lib-empty" hidden>Nothing here yet.</div>
+      </div>
+    </section>
+
+    <!-- ============ TRAIN ============ -->
+    <section class="view" id="view-train" hidden>
+      <form class="deck" id="train-form" autocomplete="off">
+        <div class="deck-scroll">
+          <p class="notice" id="train-not-installed" hidden>
+            <span data-icon="alert"></span>
+            <span>Style training isn't set up yet. Close samplegen, double-click <b>tools\install-training.bat</b> (or install.bat), then start samplegen again.</span>
+          </p>
+          <section class="deck-section">
+            <h2 class="deck-label"><span>01</span>Style</h2>
+            <label class="field"><span>Name</span><input id="train-name" maxlength="60" placeholder="Gritty Foley"></label>
+            <div class="segmented" id="train-base">
+              <button type="button" data-base="sfx" class="active" title="Train on Stable Audio 3 Small SFX (base)">SFX base</button>
+              <button type="button" data-base="music" title="Train on Stable Audio 3 Small Music (base)">Music base</button>
+            </div>
+            <label class="field">
+              <span>In common <em>added to every description</em></span>
+              <input id="train-desc" maxlength="300" placeholder="gritty analog foley, close mic, dry room">
+            </label>
+          </section>
+          <section class="deck-section">
+            <h2 class="deck-label"><span>02</span>Sounds</h2>
+            <div class="field">
+              <span>From a folder</span>
+              <div class="inline-row">
+                <input id="train-folder" placeholder="E:\SOUND\My Foley" maxlength="500">
+                <button type="button" class="ghost" id="train-scan">Load</button>
+              </div>
+              <small class="hint">Descriptions come from same-name .txt files, or from file names.</small>
+            </div>
+            <div class="field">
+              <span>From library tags</span>
+              <div class="inline-row">
+                <select id="train-tag"><option value="">Choose a tag</option></select>
+                <button type="button" class="ghost" id="train-from-tag">Load</button>
+              </div>
+              <small class="hint">Their prompts become their descriptions.</small>
+            </div>
+          </section>
+          <section class="deck-section">
+            <h2 class="deck-label"><span>03</span>Training</h2>
+            <label class="field">
+              <span>Steps <output id="train-steps-out">1500</output></span>
+              <input type="range" id="train-steps" min="500" max="4000" step="250" value="1500">
+              <small class="hint">More steps sound more like your set, but can start copying it. 1000–2000 suits 20–50 sounds.</small>
+            </label>
+          </section>
+        </div>
+        <div class="deck-foot">
+          <p class="form-error" id="train-error" role="alert" hidden></p>
+          <button type="submit" class="primary" id="train-start"><span data-icon="wave"></span><span>Start training</span></button>
+        </div>
+      </form>
+
+      <div class="screen">
+        <div class="feed train-feed">
+          <article class="job train-status" id="train-status" hidden>
+            <header>
+              <i class="led" aria-hidden="true"></i>
+              <div class="job-title" id="train-status-title"></div>
+              <div class="job-meta" id="train-status-meta"></div>
+              <button type="button" class="ghost" id="train-stop">Stop</button>
+            </header>
+            <div class="progress"><div class="progress-bar" id="train-progress"></div></div>
+            <pre class="train-log" id="train-log"></pre>
+          </article>
+          <div class="empty train-empty" id="train-empty">
+            <h1 class="empty-title">Teach it your sound.<br><em>Then generate in your style.</em></h1>
+            <p class="empty-sub">Point samplegen at 20–50 sounds that belong together. It learns what they share and adds it as a <b>Style</b> you can dial in when generating.</p>
+            <ol class="steps">
+              <li><b>01</b><strong>Name it</strong> and pick SFX or Music as the base.</li>
+              <li><b>02</b><strong>Load sounds</strong> from a folder or a library tag, then check each description.</li>
+              <li><b>03</b><strong>Train</strong> — 1000–2000 steps. When it's done, the style appears in Generate.</li>
+            </ol>
+          </div>
+          <section class="screen-section" id="train-clips-section" hidden>
+            <div class="clips-bar">
+              <h3 class="screen-label">Sounds <span id="train-count"></span></h3>
+              <button type="button" class="ghost" id="train-describe" title="Listen to every sound and write its description (you can edit them afterwards)"><span data-icon="spark"></span><span>Auto-describe</span></button>
+            </div>
+            <div class="train-clips" id="train-clips"><p class="hint">Load a folder or a tag to list the sounds to learn from.</p></div>
+          </section>
+          <section class="screen-section">
+            <h3 class="screen-label">Your styles</h3>
+            <div class="style-list" id="style-list"><p class="hint">No styles yet.</p></div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

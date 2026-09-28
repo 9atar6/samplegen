@@ -1,0 +1,193 @@
+"""Playable instruments from Foundation-1.2 Keybeds.
+
+The model generates up to six chromatic notes per pass: each note 3.0 s long,
+0.25 s apart (19.25 s for six). One seed is reused for every pass so the timbre
+stays consistent across the keyboard. The passes are sliced at those fixed
+boundaries and assembled into a Decent Sampler preset and an SFZ file.
+
+Prompt grammar (from the model's keybed_training_strategy.md):
+    Keybed, Sequence, Timbre Profile, <descriptor>, <Dry|Wet + FX>, Chromatic Chunk, Note Sequence, C4, C#4, ...
+"""
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+from xml.sax.saxutils import escape, quoteattr
+
+import numpy as np
+
+from .audio import ExportFormat, apply_fades, fit_length, write_wav
+
+NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+NOTES_PER_CHUNK = 6
+NOTE_SECONDS = 3.0
+GAP_SECONDS = 0.25
+LOWEST_MIDI, HIGHEST_MIDI = 24, 96  # C1 .. C7
+MAX_NOTES = 61  # five octaves + 1
+EDGE_STRETCH = 6  # semitones the outermost samples cover beyond the generated range
+PREVIEW_NOTE_SECONDS = 0.6
+SPACES = ("Dry", "Wet")
+INSTRUMENT_DIR = "Instruments"
+
+
+def midi_to_name(midi: int) -> str:
+    """60 -> 'C4' (middle C = C4)."""
+    return f"{NOTE_NAMES[midi % 12]}{midi // 12 - 1}"
+
+
+def name_to_midi(name: str) -> int:
+    match = re.fullmatch(r"([A-Ga-g])(#|b)?(-?\d)", name.strip())
+    if not match:
+        raise ValueError(f"'{name}' isn't a note name like C4 or F#2.")
+    letter, accidental, octave = match.groups()
+    semitone = NOTE_NAMES.index(letter.upper()) + {"#": 1, "b": -1, None: 0}[accidental]
+    return (int(octave) + 1) * 12 + semitone
+
+
+def chunk_notes(low: int, high: int) -> list[list[int]]:
+    notes = list(range(low, high + 1))
+    return [notes[i:i + NOTES_PER_CHUNK] for i in range(0, len(notes), NOTES_PER_CHUNK)]
+
+
+def chunk_seconds(note_count: int) -> float:
+    return note_count * NOTE_SECONDS + (note_count - 1) * GAP_SECONDS
+
+
+def keybed_prompt(descriptor: str, space: str, notes: list[int]) -> str:
+    parts = ["Keybed", "Sequence", "Timbre Profile"]
+    parts += [t.strip() for t in descriptor.split(",") if t.strip()]
+    parts += [space, "Chromatic Chunk", "Note Sequence"]
+    parts += [midi_to_name(n) for n in notes]
+    return ", ".join(parts)
+
+
+@dataclass(frozen=True)
+class InstrumentRequest:
+    prompt: str  # timbre descriptor, e.g. "Grand Piano, Warm, Gritty"
+    name: str = ""
+    low_note: str = "C3"
+    high_note: str = "B4"
+    space: str = "Dry"
+    seed: int | None = None
+    export: ExportFormat = field(default_factory=lambda: ExportFormat(sample_rate=44100, bit_depth="24"))
+    mode: str = "instrument"
+    model: str = "f1-keybeds"
+    variations: int = 1
+    uses_source = False
+
+    def full_prompt(self) -> str:
+        return f"{self.prompt.strip()} · {self.low_note}–{self.high_note} · {self.space}"
+
+    def midi_range(self) -> tuple[int, int]:
+        return name_to_midi(self.low_note), name_to_midi(self.high_note)
+
+    def validate(self, source_seconds: float | None = None) -> None:
+        if not self.prompt.strip():
+            raise ValueError("Describe the instrument, e.g. 'Grand Piano, Warm, Gritty'.")
+        if len(self.prompt) > 500 or len(self.name) > 80:
+            raise ValueError("The description or name is too long.")
+        if self.space not in SPACES:
+            raise ValueError("Choose Dry or Wet.")
+        low, high = self.midi_range()
+        if not LOWEST_MIDI <= low <= high <= HIGHEST_MIDI:
+            raise ValueError(f"Notes must go from low to high, within {midi_to_name(LOWEST_MIDI)}–{midi_to_name(HIGHEST_MIDI)}.")
+        if high - low + 1 > MAX_NOTES:
+            raise ValueError(f"Up to {MAX_NOTES} notes (five octaves) per instrument.")
+        if self.seed is not None and not 0 <= self.seed <= 2**32 - 1:
+            raise ValueError("Seed is out of range.")
+
+
+def slice_chunk(raw: np.ndarray, notes: list[int], sample_rate: int) -> dict[int, np.ndarray]:
+    """Cut one generated pass into its notes at the fixed 3.0 s / 0.25 s grid."""
+    note_frames = int(NOTE_SECONDS * sample_rate)
+    slices = {}
+    for index, midi in enumerate(notes):
+        start = int(round(index * (NOTE_SECONDS + GAP_SECONDS) * sample_rate))
+        note = fit_length(raw[start:start + note_frames], note_frames)
+        slices[midi] = apply_fades(note, sample_rate, fade_in_ms=2.0, fade_out_ms=40.0)
+    return slices
+
+
+def normalize_together(notes: dict[int, np.ndarray], target_db: float = -1.0) -> dict[int, np.ndarray]:
+    """One gain for the whole instrument, so it keeps its dynamics across the keyboard."""
+    peak = max((float(np.abs(a).max()) for a in notes.values() if a.size), default=0.0)
+    if peak <= 0:
+        return dict(notes)
+    gain = 10 ** (target_db / 20) / peak
+    return {midi: audio * gain for midi, audio in notes.items()}
+
+
+def preview_run(notes: dict[int, np.ndarray], sample_rate: int) -> np.ndarray:
+    """A quick scale run through every note, for auditioning in the library."""
+    frames = int(PREVIEW_NOTE_SECONDS * sample_rate)
+    parts = [apply_fades(notes[m][:frames], sample_rate, fade_out_ms=60.0) for m in sorted(notes)]
+    return np.concatenate(parts) if parts else np.zeros((0, 2))
+
+
+def key_ranges(midis: list[int]) -> dict[int, tuple[int, int]]:
+    """Each sample covers its own key; the outermost ones stretch past the range."""
+    ordered = sorted(midis)
+    ranges = {m: (m, m) for m in ordered}
+    if ordered:
+        low, high = ordered[0], ordered[-1]
+        ranges[low] = (max(0, low - EDGE_STRETCH), ranges[low][1])
+        ranges[high] = (ranges[high][0], min(127, high + EDGE_STRETCH))
+    return ranges
+
+
+def decent_sampler_preset(title: str, files: dict[int, str]) -> str:
+    ranges = key_ranges(list(files))
+    regions = "\n".join(
+        f'      <sample path={quoteattr(path)} rootNote="{midi}" loNote="{ranges[midi][0]}" '
+        f'hiNote="{ranges[midi][1]}" loVel="0" hiVel="127"/>'
+        for midi, path in sorted(files.items())
+    )
+    knob = ('      <labeled-knob x="{x}" y="40" width="90" label="{label}" type="float" minValue="{lo}" '
+            'maxValue="{hi}" value="{val}" textColor="FFFFFFFF">\n'
+            '        <binding type="amp" level="instrument" position="0" parameter="{param}"/>\n'
+            '      </labeled-knob>')
+    knobs = "\n".join([
+        knob.format(x=20, label="Attack", lo=0, hi=4, val=0.005, param="ENV_ATTACK"),
+        knob.format(x=120, label="Release", lo=0, hi=8, val=0.6, param="ENV_RELEASE"),
+    ])
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<DecentSampler minVersion="1.0.0">\n'
+        '  <ui width="812" height="375" bgColor="FF141414">\n'
+        '    <tab name="main">\n'
+        f'      <label x="20" y="10" width="700" height="24" text={quoteattr(title)} textColor="FFFF9A66"/>\n'
+        f'{knobs}\n'
+        '    </tab>\n'
+        '  </ui>\n'
+        '  <groups attack="0.005" decay="1" sustain="1" release="0.6">\n'
+        '    <group>\n'
+        f'{regions}\n'
+        '    </group>\n'
+        '  </groups>\n'
+        '</DecentSampler>\n'
+    )
+
+
+def sfz_file(title: str, files: dict[int, str]) -> str:
+    ranges = key_ranges(list(files))
+    lines = [f"// {escape(title)} (samplegen / Foundation-1.2 Keybeds)",
+             "<global> ampeg_attack=0.005 ampeg_release=0.6"]
+    for midi, path in sorted(files.items()):
+        lo, hi = ranges[midi]
+        lines.append(f"<region> sample={path} pitch_keycenter={midi} lokey={lo} hikey={hi}")
+    return "\n".join(lines) + "\n"
+
+
+def write_instrument(folder: Path, title: str, file_stem: str, notes: dict[int, np.ndarray], sample_rate: int,
+                     fmt: ExportFormat) -> dict[int, str]:
+    """Write Samples/*.wav + <stem>.dspreset + <stem>.sfz. Returns midi -> relative sample path."""
+    samples_dir = folder / "Samples"
+    samples_dir.mkdir(parents=True, exist_ok=True)
+    files = {}
+    for midi, audio in sorted(notes.items()):
+        rel = f"Samples/{file_stem}_{midi_to_name(midi).replace('#', 's')}.wav"
+        write_wav(folder / rel, audio, sample_rate, fmt, title=f"{title} {midi_to_name(midi)}")
+        files[midi] = rel
+    (folder / f"{file_stem}.dspreset").write_text(decent_sampler_preset(title, files), encoding="utf-8")
+    (folder / f"{file_stem}.sfz").write_text(sfz_file(title, files), encoding="utf-8")
+    return files
