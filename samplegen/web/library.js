@@ -41,14 +41,14 @@ export async function loadLibrary() {
     return;
   }
   if (ticket !== latestLoad) return; // a newer search/filter is on its way
-  for (const el of list.querySelectorAll(".sample")) removeRow(el.dataset.id);
+  for (const el of list.querySelectorAll(".sample")) removeRow(el.dataset.id, list);
   const matches = (r) => (filter === "favorites" ? r.favorite && r.status !== "trashed" : r.status === filter)
     && (!tag || (r.tags || []).includes(tag));
   state.shown = records.map((r) => r.id);
   list.replaceChildren(...records.map((r) => createSampleRow(r, {
     onChange: (updated) => {
       if (!matches(updated)) {
-        removeRow(updated.id);
+        removeRow(updated.id, list);
         state.shown = state.shown.filter((id) => id !== updated.id);
       }
       refreshTags();

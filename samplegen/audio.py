@@ -48,14 +48,29 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
     return data, sr
 
 
+def resample_loop(audio: np.ndarray, from_rate: int, to_rate: int) -> np.ndarray:
+    """Resample a loop as the cycle it is: the filter sees the loop's own end before its
+    start (not silence), so the wrap stays seamless, and the length stays exact."""
+    frames = round(len(audio) * to_rate / from_rate)
+    tiled = soxr.resample(np.concatenate([audio, audio, audio]), from_rate, to_rate, quality="VHQ")
+    middle = tiled[frames:2 * frames]
+    return fit_length(middle, frames)
+
+
 def write_wav(path: Path, audio: np.ndarray, sample_rate: int, fmt: ExportFormat,
-              title: str = "", comment: str = "") -> None:
+              title: str = "", comment: str = "", loop: bool = False) -> None:
     """Resample if needed, then write atomically (via a .part file)."""
     out = audio
     if fmt.sample_rate != sample_rate:
-        out = soxr.resample(audio, sample_rate, fmt.sample_rate, quality="VHQ")
+        out = (resample_loop(audio, sample_rate, fmt.sample_rate) if loop
+               else soxr.resample(audio, sample_rate, fmt.sample_rate, quality="VHQ"))
     if fmt.bit_depth == "16":
         out = _tpdf_dither(out, bits=16)
+    if fmt.bit_depth != "32f":
+        # Integer formats can't go past full scale: clip instead of wrapping around
+        # (resampling overshoot, unnormalized stems, a 0 dB normalize target + dither).
+        lsb = 1.0 / (2 ** (int(fmt.bit_depth) - 1))
+        out = np.clip(out, -1.0, 1.0 - lsb)
 
     path = Path(path)
     tmp = path.with_name(path.name + ".part")
@@ -81,9 +96,12 @@ def remove_dc(audio: np.ndarray) -> np.ndarray:
     return audio - audio.mean(axis=0, keepdims=True)
 
 
+NEAR_SILENCE = 1e-4  # -80 dBFS: below this, "normalizing" would only turn noise into a wall of hiss
+
+
 def normalize_peak(audio: np.ndarray, target_db: float) -> np.ndarray:
     peak = float(np.abs(audio).max()) if audio.size else 0.0
-    if peak <= 0.0:
+    if not peak > NEAR_SILENCE:
         return audio.copy()
     return audio * (db_to_gain(target_db) / peak)
 
@@ -98,8 +116,14 @@ def fit_length(audio: np.ndarray, frames: int) -> np.ndarray:
 
 def trim_silence(audio: np.ndarray, sample_rate: int, threshold_db: float = SILENCE_DB,
                  preroll_ms: float = 2.0, tail_ms: float = 30.0) -> np.ndarray:
-    """Cut leading/trailing audio below threshold, keeping a little air around it."""
-    loud = np.flatnonzero(np.abs(audio).max(axis=1) > db_to_gain(threshold_db))
+    """Cut leading/trailing audio below threshold, keeping a little air around it.
+
+    The threshold is relative to the clip's own peak (it runs before normalizing),
+    so quiet and loud takes are trimmed the same way.
+    """
+    level = np.abs(audio).max(axis=1) if audio.size else np.zeros(0)
+    peak = float(level.max()) if level.size else 0.0
+    loud = np.flatnonzero(level > peak * db_to_gain(threshold_db)) if peak > 0 else np.zeros(0, dtype=int)
     if loud.size == 0:
         return audio.copy()
     start = max(0, loud[0] - int(preroll_ms / 1000 * sample_rate))
@@ -108,7 +132,8 @@ def trim_silence(audio: np.ndarray, sample_rate: int, threshold_db: float = SILE
 
 
 def _ramp(length: int) -> np.ndarray:
-    """Equal-power style (sin²) ramp from 0 to 1, shape (length, 1)."""
+    """Smooth (sin²) ramp from 0 to 1, shape (length, 1). Paired with 1 - ramp it keeps
+    constant amplitude: right for correlated material (loop wrap, splices)."""
     return (np.sin(np.linspace(0.0, np.pi / 2, length)) ** 2)[:, None]
 
 
@@ -140,8 +165,8 @@ def make_seamless_loop(raw: np.ndarray, loop_frames: int, sample_rate: int,
     loop = fit_length(raw, loop_frames)
     if fade <= 0:
         return loop
-    if len(raw) < loop_frames + fade:
-        return apply_fades(loop, sample_rate, fade_out_ms=crossfade_ms)
+    if len(raw) < loop_frames + fade:  # both ends to zero, or the wrap would click
+        return apply_fades(loop, sample_rate, fade_in_ms=crossfade_ms, fade_out_ms=crossfade_ms)
     ramp = _ramp(fade)
     continuation = raw[loop_frames:loop_frames + fade]
     loop[:fade] = loop[:fade] * ramp + continuation * (1.0 - ramp)
@@ -154,6 +179,9 @@ def region_mask(frames: int, regions: list[tuple[float, float]], sample_rate: in
     for start, end in regions:
         mask[max(0, int(start * sample_rate)):max(0, int(end * sample_rate))] = True
     return mask
+
+
+MAX_MATCH_GAIN = db_to_gain(12.0)
 
 
 def _rms(audio: np.ndarray) -> float:
@@ -173,8 +201,8 @@ def splice_regions(original: np.ndarray, generated: np.ndarray, regions: list[tu
     mask = region_mask(frames, regions, sample_rate)
     keep = ~mask
     gen_level, orig_level = _rms(generated[keep]), _rms(original[keep])
-    if gen_level > 0 and orig_level > 0:
-        generated = generated * (orig_level / gen_level)
+    if gen_level > 0 and orig_level > 0:  # clamped: a near-silent take must not be boosted 60 dB
+        generated = generated * float(np.clip(orig_level / gen_level, MAX_MATCH_GAIN ** -1, MAX_MATCH_GAIN))
 
     fade = int(crossfade_ms / 1000 * sample_rate)
     weight = mask.astype(float)

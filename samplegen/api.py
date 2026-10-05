@@ -1,11 +1,15 @@
 """HTTP API + static web UI."""
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -16,7 +20,7 @@ from .autodescribe import Describer
 from .catalog import KEYS, LOOP_BARS, LOOP_BPMS, LOOP_TAGS, MODELS, SCALES
 from .generation_request import GenerationRequest
 from .jobs import JobManager
-from .library import Library, SampleNotFound
+from .library import FileInUse, Library, SampleNotFound
 from .setup_check import FIX as SETUP_FIX
 from .setup_check import missing_parts
 from .sources import MAX_UPLOAD_BYTES, SourceNotFound, SourceStore
@@ -100,6 +104,28 @@ def to_request(body: GenerateIn) -> GenerationRequest:
 
 def create_app(ctx: AppContext) -> FastAPI:
     app = FastAPI(title="samplegen", docs_url=None, redoc_url=None)
+    # Only answer to this machine's own names: blocks DNS-rebinding pages from reading the API.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+
+    @app.middleware("http")
+    async def same_origin_writes(request: Request, call_next):
+        # A web page you visit could otherwise POST to localhost (trash samples, open Explorer...).
+        # Browsers always send Origin on cross-site POSTs; samplegen's own page is same-origin.
+        origin = request.headers.get("origin")
+        if request.method not in ("GET", "HEAD", "OPTIONS") and origin:
+            host = urlsplit(origin).hostname
+            if host not in ("127.0.0.1", "localhost", "testserver"):
+                return JSONResponse({"detail": "Cross-site request refused"}, status_code=403)
+        return await call_next(request)
+
+    @app.exception_handler(FileInUse)
+    async def file_in_use(_request: Request, exc: FileInUse):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(sqlite3.Error)
+    async def library_unavailable(_request: Request, exc: sqlite3.Error):
+        return JSONResponse({"detail": f"The sample library isn't reachable ({exc}). "
+                                       "Is its drive still plugged in?"}, status_code=503)
 
     @app.middleware("http")
     async def revalidate_ui(request: Request, call_next):
@@ -215,16 +241,19 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.post("/api/sources", status_code=201)
     async def upload_source(request: Request, filename: str = Query("source", max_length=200)):
         too_big = HTTPException(413, f"Files are limited to {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
-        if int(request.headers.get("content-length") or 0) > MAX_UPLOAD_BYTES:
-            raise too_big
-        chunks, received = [], 0
+        declared = request.headers.get("content-length") or "0"
+        if not declared.isdigit() or int(declared) > MAX_UPLOAD_BYTES:
+            raise too_big if declared.isdigit() else HTTPException(400, "Bad Content-Length")
+        body, received = bytearray(), 0
         async for chunk in request.stream():  # enforce the cap even without a Content-Length
             received += len(chunk)
             if received > MAX_UPLOAD_BYTES:
                 raise too_big
-            chunks.append(chunk)
+            body += chunk
         try:
-            return ctx.sources.import_bytes(b"".join(chunks), filename).to_dict()
+            # Decoding can take seconds: keep it off the event loop so the UI stays responsive.
+            source = await run_in_threadpool(ctx.sources.import_bytes, bytes(body), filename)
+            return source.to_dict()
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
 

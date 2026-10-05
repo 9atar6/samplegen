@@ -100,10 +100,44 @@ def test_export_pack_copies_and_writes_csv(lib, tmp_path):
     assert sorted(p.name for p in (result.folder / "SFX").iterdir()) == ["boom-2.wav", "boom.wav"]
     assert (result.folder / "Loops" / "bass.wav").exists()
     assert lib.path_of(a).exists()  # a copy, the library is untouched
-    with open(result.folder / "samples.csv", encoding="utf-8") as f:
+    with open(result.folder / "samples.csv", encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     loop_row = next(r for r in rows if r["type"] == "loop")
     assert (loop_row["bpm"], loop_row["key"], loop_row["tags"]) == ("140", "E minor", "acid")
+
+
+def test_pack_csv_never_holds_spreadsheet_formulas(lib, tmp_path):
+    a = add(lib, tmp_path, "evil", prompt='=HYPERLINK("http://x","click")')
+    result = export_pack(lib, [a], "P")
+    with open(result.folder / "samples.csv", encoding="utf-8-sig") as f:
+        row = next(csv.DictReader(f))
+    assert row["prompt"].startswith("'=")
+
+
+def test_reserved_windows_names_are_not_used_as_folders():
+    assert clean_pack_name("CON") == "_CON"
+    assert clean_pack_name("nul.txt") == "_nul.txt"
+    assert clean_pack_name("Console") == "Console"
+
+
+def test_sample_whose_file_vanished_can_still_be_trashed(lib, tmp_path):
+    record = add(lib, tmp_path, "ghost")
+    lib.path_of(record).unlink()  # deleted outside samplegen
+    assert lib.set_status(record.id, "trashed").status == "trashed"
+
+
+def test_file_open_elsewhere_reports_file_in_use_and_keeps_record(lib, tmp_path, monkeypatch):
+    from samplegen import library as library_module
+
+    record = add(lib, tmp_path, "busy")
+
+    def locked(*_args):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(library_module.os, "replace", locked)
+    with pytest.raises(library_module.FileInUse, match="open in another program"):
+        lib.set_status(record.id, "kept")
+    assert lib.get(record.id).status == "new" and lib.path_of(record).exists()
 
 
 def test_export_pack_never_overwrites_and_converts(lib, tmp_path):

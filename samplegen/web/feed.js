@@ -9,6 +9,7 @@ const $ = (sel) => document.querySelector(sel);
 const JOB_POLL_MS = 700;
 const EXTRA_LABELS = { demucs: "Stem split" };
 const MAX_SKELETONS = 8;
+const MAX_POLL_FAILURES = 15; // ~1.5 min of silence at the slowest poll rate
 
 let labelFor = (key) => EXTRA_LABELS[key] ?? key;
 
@@ -80,17 +81,26 @@ export async function track(job, again = null) {
   const started = Date.now();
   const label = labelFor(job.model);
   const what = job.mode === "instrument" ? "building" : job.mode === "stems" ? "splitting" : "generating";
+  let failures = 0;
 
   while (!["done", "error", "cancelled"].includes(job.state)) {
     const elapsed = ((Date.now() - started) / 1000).toFixed(0);
     const count = job.variations > 1 ? ` · ${job.variations}×` : "";
     view.meta.textContent = `${label}${count} · ${job.state === "queued" ? "waiting" : what} ${elapsed}s`;
     view.card.dataset.state = job.state;
-    await new Promise((r) => setTimeout(r, JOB_POLL_MS));
+    await new Promise((r) => setTimeout(r, JOB_POLL_MS * Math.min(2 ** failures, 8)));
     try {
       job = await api.job(job.id);
+      failures = 0;
     } catch (err) {
-      job = { ...job, state: "error", error: err.message };
+      // A blip (sleep, busy server) isn't a failed job: keep asking, slower. Only give up
+      // when the app says the job no longer exists, or after a long silence.
+      failures += 1;
+      if (err.status === 404) {
+        job = { ...job, state: "error", error: "This job was lost (samplegen restarted?). Its finished takes are in the Library." };
+      } else if (failures >= MAX_POLL_FAILURES) {
+        job = { ...job, state: "error", error: `Lost contact with samplegen: ${err.message}. Check the Library for results.` };
+      }
     }
   }
 
@@ -123,8 +133,10 @@ export async function track(job, again = null) {
     view.card.append(note);
     return;
   }
-  const records = await Promise.all(job.sample_ids.map((id) => api.sample(id)));
+  const results = await Promise.allSettled(job.sample_ids.map((id) => api.sample(id)));
+  const records = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
   view.list.replaceChildren(...records.map((r) => createSampleRow(r)));
+  if (records.length < n) toast(`${n - records.length} take(s) couldn't be loaded — look in the Library.`, "error");
   view.list.querySelector(".sample")?.focus({ preventScroll: true });
   toast(job.mode === "instrument" ? "Instrument ready — the folder icon opens it." : `${n} new ${n === 1 ? "take" : "takes"} ready`, "ok");
 }

@@ -71,10 +71,15 @@ class SourceStore:
             raise ValueError("The file is empty.")
         if len(data) > MAX_UPLOAD_BYTES:
             raise ValueError(f"Files are limited to {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.")
+        unreadable = ValueError("Couldn't read that file. Use WAV, AIFF, FLAC, OGG or MP3.")
         try:
+            # Check the length from the header first: a small compressed file can decode to gigabytes.
+            info = sf.info(io.BytesIO(data))
+            if info.samplerate > 0 and info.frames / info.samplerate > MAX_SOURCE_SECONDS:
+                raise ValueError(f"Sources are limited to {MAX_SOURCE_SECONDS / 60:.0f} minutes.")
             audio, sr = sf.read(io.BytesIO(data), dtype="float64", always_2d=True)
         except (sf.LibsndfileError, RuntimeError, TypeError) as exc:
-            raise ValueError("Couldn't read that file. Use WAV, AIFF, FLAC, OGG or MP3.") from exc
+            raise unreadable from exc
         if len(audio) == 0:
             raise ValueError("The file has no audio.")
         name = Path(filename).stem[:80] or "source"

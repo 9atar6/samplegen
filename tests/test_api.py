@@ -28,6 +28,16 @@ def generate(client, jobs, **overrides):
     return client.get(f"/api/jobs/{job.id}").json()
 
 
+def test_other_websites_cannot_drive_the_api(app_env):
+    client, _, _ = app_env
+    attack = client.post("/api/jobs/x/cancel", headers={"Origin": "https://evil.example"})
+    assert attack.status_code == 403
+    own_page = client.post("/api/jobs/x/cancel", headers={"Origin": "http://127.0.0.1:8190"})
+    assert own_page.status_code == 404  # allowed through; the job just doesn't exist
+    rebinding = client.get("/api/status", headers={"Host": "evil.example"})
+    assert rebinding.status_code == 400
+
+
 def test_status_and_catalog(app_env):
     client, _, _ = app_env
     status = client.get("/api/status").json()

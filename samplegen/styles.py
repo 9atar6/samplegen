@@ -74,7 +74,10 @@ class StyleStore:
         meta = self._meta_path(slug)
         if not meta.exists():
             raise StyleNotFound(slug)
-        style = Style(**json.loads(meta.read_text(encoding="utf-8")))
+        try:
+            style = Style(**json.loads(meta.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):  # damaged sidecar: treat like list() does
+            raise StyleNotFound(slug) from None
         if not (self.dir / style.lora_file).exists():
             raise StyleNotFound(slug)
         return style

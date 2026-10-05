@@ -32,11 +32,24 @@ class PackResult:
         return {"name": self.name, "folder": str(self.folder), "exported": self.exported, "missing": self.missing}
 
 
+RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
 def clean_pack_name(name: str) -> str:
-    cleaned = INVALID_NAME_CHARS.sub("", name).strip().strip(".")[:MAX_PACK_NAME].strip()
+    cleaned = INVALID_NAME_CHARS.sub("", name).strip().strip(".")[:MAX_PACK_NAME].strip().rstrip(". ")
     if not cleaned:
         raise ValueError("Give the pack a name.")
+    if cleaned.split(".")[0].upper() in RESERVED_NAMES:  # Windows can't create a folder called CON, NUL...
+        cleaned = f"_{cleaned}"
     return cleaned
+
+
+def _csv_safe(value):
+    """Spreadsheets run cells starting with = + - @ as formulas: a prompt must stay text."""
+    if isinstance(value, str) and value.startswith(FORMULA_START):
+        return "'" + value
+    return value
 
 
 def free_folder(parent: Path, name: str) -> Path:
@@ -80,7 +93,8 @@ def export_pack(library: Library, records: list[SampleRecord], name: str,
             shutil.copy2(source, dest)
         else:
             audio, sr = read_wav(source)
-            write_wav(dest, audio, sr, fmt, title=record.name, comment=f"samplegen | {record.prompt}"[:1000])
+            write_wav(dest, audio, sr, fmt, title=record.name, comment=f"samplegen | {record.prompt}"[:1000],
+                      loop=record.mode == "loop" or bool(record.params.get("loop")))
         p = record.params
         rows.append({
             "file": dest.relative_to(folder).as_posix(), "name": record.name, "type": record.mode,
@@ -89,8 +103,9 @@ def export_pack(library: Library, records: list[SampleRecord], name: str,
             "tags": " ".join(record.tags), "duration_s": f"{record.duration:.3f}",
         })
 
-    with open(folder / "samples.csv", "w", newline="", encoding="utf-8") as f:
+    # utf-8-sig: Excel only reads accents correctly when the file starts with a BOM.
+    with open(folder / "samples.csv", "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows({k: _csv_safe(v) for k, v in row.items()} for row in rows)
     return PackResult(name=folder.name, folder=folder, exported=len(rows), missing=missing)

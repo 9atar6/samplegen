@@ -12,8 +12,8 @@ Layout under the library root:
 from __future__ import annotations
 
 import json
+import os
 import re
-import shutil
 import sqlite3
 import threading
 import uuid
@@ -57,6 +57,14 @@ CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status, created_at);
 
 class SampleNotFound(KeyError):
     pass
+
+
+class FileInUse(OSError):
+    """Windows won't move a file another program (DAW, player) has open."""
+
+    def __str__(self) -> str:
+        return (f"{Path(self.args[0]).name} is open in another program (a DAW or player?). "
+                "Close it there and try again.")
 
 
 @dataclass(frozen=True)
@@ -143,7 +151,7 @@ class Library:
 
     def add(self, source: Path, sample: NewSample) -> SampleRecord:
         """Move a finished WAV into the Inbox and index it."""
-        sample_id = uuid.uuid4().hex[:8]
+        sample_id = uuid.uuid4().hex[:12]  # 8 hex chars collide around ~10k samples
         now = datetime.now()
         rel_path = Path("Inbox") / now.strftime("%Y-%m-%d") / make_filename(sample.name, sample_id)
         record = SampleRecord(
@@ -264,17 +272,29 @@ class Library:
         return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
 
     def _move_then_write(self, source: Path, dest: Path, sql: str, values: tuple) -> None:
-        """Move the file and record it; if the DB write fails, put the file back."""
+        """Move the file and record it; if the DB write fails, put the file back.
+
+        os.replace only (everything lives under one root, so one volume): it's atomic and,
+        unlike shutil.move, never leaves a half-copied duplicate when Windows refuses to
+        delete a file that's in use. A missing source (moved or deleted outside samplegen)
+        only updates the record, so the sample can still be trashed or kept.
+        """
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists():
-            raise FileExistsError(dest)
-        shutil.move(str(source), str(dest))
+        moved = source.exists()
+        if moved:
+            if dest.exists():
+                raise FileExistsError(dest)
+            try:
+                os.replace(source, dest)
+            except PermissionError as exc:
+                raise FileInUse(source) from exc
         try:
             self._db.execute(sql, values)
             self._db.commit()
         except Exception:
             self._db.rollback()
-            shutil.move(str(dest), str(source))
+            if moved:
+                os.replace(dest, source)
             raise
 
 

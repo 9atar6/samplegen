@@ -5,7 +5,9 @@ import { toast } from "./toast.js";
 
 const $ = (sel) => document.querySelector(sel);
 const POLL_MS = 2000;
-const state = { base: "sfx", clips: [], polling: false };
+const MAX_CLIPS = 500; // the server's limit (training.py)
+const MAX_POLL_FAILURES = 20;
+const state = { base: "sfx", clips: [], polling: false, pollFailures: 0 };
 
 const STATE_LABELS = {
   preparing: "Preparing sounds…", training: "Training…", converting: "Converting for the engine…",
@@ -24,11 +26,15 @@ function syncEmpty() {
   $("#train-clips-section").hidden = state.clips.length === 0;
 }
 
+function renderCount() {
+  const included = state.clips.filter((c) => c.include).length;
+  $("#train-count").textContent = state.clips.length ? `${included} of ${state.clips.length} selected` : "";
+}
+
 function renderClips() {
   syncEmpty();
   const list = $("#train-clips");
-  const included = state.clips.filter((c) => c.include).length;
-  $("#train-count").textContent = state.clips.length ? `${included} of ${state.clips.length} selected` : "";
+  renderCount();
   if (!state.clips.length) {
     list.innerHTML = "";
     const p = document.createElement("p");
@@ -44,7 +50,12 @@ function renderClips() {
     check.type = "checkbox";
     check.checked = clip.include;
     check.title = "Use this sound";
-    check.addEventListener("change", () => { clip.include = check.checked; renderClips(); });
+    // Only the count and this row change: re-rendering 500 rows would also drop keyboard focus.
+    check.addEventListener("change", () => {
+      clip.include = check.checked;
+      row.classList.toggle("excluded", !clip.include);
+      renderCount();
+    });
     const name = document.createElement("span");
     name.className = "clip-name";
     name.textContent = clip.name;
@@ -53,8 +64,9 @@ function renderClips() {
     caption.value = clip.caption;
     caption.maxLength = 400;
     caption.placeholder = "Describe this sound";
-    caption.addEventListener("input", () => { clip.caption = caption.value; });
+    caption.addEventListener("input", () => { clip.caption = caption.value; clip.edited = true; });
     row.append(check, name, caption);
+    row.classList.toggle("excluded", !clip.include);
     row.dataset.index = String(index);
     if (clip.fresh) {
       row.classList.add("fresh");
@@ -66,11 +78,16 @@ function renderClips() {
 
 function addClips(items) {
   const known = new Set(state.clips.map((c) => c.path || c.sample_id));
+  let skipped = 0;
   for (const item of items) {
     const key = item.path || item.sample_id;
-    if (!known.has(key)) state.clips.push({ ...item, include: true });
+    if (known.has(key)) continue;
+    if (state.clips.length >= MAX_CLIPS) { skipped += 1; continue; }
+    state.clips.push({ ...item, include: true });
+    known.add(key);
   }
   renderClips();
+  if (skipped) toast(`A style can learn from up to ${MAX_CLIPS} sounds: ${skipped} more were left out.`, "info");
 }
 
 async function loadFolder() {
@@ -99,12 +116,15 @@ async function loadTag() {
 }
 
 async function autoDescribe() {
-  const clips = state.clips.filter((c) => c.include);
-  if (!clips.length) return showError("Select at least one sound to describe.");
+  // Descriptions you typed yourself are kept; only the others are filled in.
+  const clips = state.clips.filter((c) => c.include && !c.edited);
+  if (!clips.length) return showError("Select at least one sound to describe (ones you've typed a description for are kept).");
   showError("");
   const button = $("#train-describe");
+  if (button.disabled) return;
   const label = button.querySelector("span:last-child");
   button.classList.add("busy");
+  button.disabled = true;
   label.textContent = `Listening to ${clips.length} sounds…`;
   try {
     const result = await api.trainingDescribe(clips.map((c) => (c.sample_id ? { sample_id: c.sample_id } : { path: c.path })));
@@ -123,6 +143,7 @@ async function autoDescribe() {
     showError(err.message);
   } finally {
     button.classList.remove("busy");
+    button.disabled = false;
     label.textContent = "Auto-describe";
   }
 }
@@ -188,8 +209,16 @@ async function poll() {
   let status;
   try {
     status = await api.training();
+    state.pollFailures = 0;
   } catch {
-    state.polling = false;
+    // The app may be busy or restarting: keep trying for a while instead of freezing the card.
+    state.pollFailures += 1;
+    if (state.pollFailures >= MAX_POLL_FAILURES) {
+      state.polling = false;
+      $("#train-status-meta").textContent = "Lost contact with samplegen — reopen this tab to check again.";
+      return;
+    }
+    setTimeout(poll, POLL_MS * Math.min(state.pollFailures, 5));
     return;
   }
   renderStatus(status);
@@ -229,11 +258,15 @@ async function start(e) {
     clips: clips.map((c) => (c.sample_id ? { sample_id: c.sample_id, caption: c.caption } : { path: c.path, caption: c.caption })),
   };
   if (!body.name) return showError("Give the style a name.");
+  const button = $("#train-start");
+  if (button.disabled) return;
+  button.disabled = true; // a double-click would send a second start and show a bogus error
   try {
     renderStatus(await api.trainingStart(body));
     startPolling();
   } catch (err) {
     showError(err.message);
+    button.disabled = false;
   }
 }
 

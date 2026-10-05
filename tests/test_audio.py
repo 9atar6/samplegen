@@ -179,3 +179,42 @@ def test_export_format_validation():
         ExportFormat(sample_rate=22050, bit_depth="24")
     with pytest.raises(ValueError):
         ExportFormat(sample_rate=44100, bit_depth="8")
+
+
+def test_loop_resampled_to_48k_keeps_exact_length_and_a_seamless_wrap():
+    from samplegen.audio import resample_loop
+
+    loop = sine(2.0, freq=220.0)  # 440 whole cycles: wraps perfectly at 44.1 kHz
+    out = resample_loop(loop, SR, 48000)
+    assert len(out) == 96000
+    wrap_step = np.abs(out[0] - out[-1]).max()
+    typical_step = np.abs(np.diff(out[:, 0])).max()
+    assert wrap_step <= typical_step * 1.05  # the jump across the loop point is like any other
+
+
+def test_16_bit_export_clips_instead_of_wrapping(tmp_path):
+    hot = sine(0.1, amp=1.4)  # e.g. an unnormalized stem
+    path = tmp_path / "hot.wav"
+    write_wav(path, hot, SR, ExportFormat(44100, "16"))
+    data, _ = sf.read(str(path), dtype="int16", always_2d=True)
+    positive_half = data[: int(0.0011 * SR)]  # first quarter cycle of 440 Hz rises to the top
+    assert positive_half.min() >= -1 and data.max() == 32767
+
+
+def test_normalize_does_not_blow_up_near_silence():
+    hiss = sine(0.1, amp=1e-5)
+    np.testing.assert_array_equal(normalize_peak(hiss, -1.0), hiss)
+
+
+def test_trim_silence_is_relative_to_the_clip_peak():
+    quiet_body = sine(0.2, amp=0.0005)  # whole take far below -60 dBFS
+    x = np.concatenate([np.zeros((SR // 2, 2)), quiet_body, np.zeros((SR // 2, 2))])
+    y = trim_silence(x, SR, preroll_ms=0, tail_ms=0)
+    assert len(y) == pytest.approx(len(quiet_body), abs=50)
+
+
+def test_splice_gain_match_is_limited():
+    original = sine(2.0, amp=0.5)
+    near_silent_take = sine(2.0, amp=1e-6)
+    out = splice_regions(original, near_silent_take, [(0.5, 1.0)], SR)
+    assert np.abs(out).max() <= 0.5 + 1e-9  # not boosted by +114 dB into the region

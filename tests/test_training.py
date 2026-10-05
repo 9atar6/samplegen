@@ -247,3 +247,38 @@ def test_job_manager_refuses_work_while_training():
     manager = JobManager(Gen(), busy=lambda: "A style is training right now")
     with pytest.raises(ValueError, match="training"):
         manager.submit(object())
+
+
+def test_half_written_metrics_row_does_not_crash_progress(tmp_path):
+    logs = tmp_path / "lightning_logs" / "version_0"
+    logs.mkdir(parents=True)
+    (logs / "metrics.csv").write_text("loss,epoch,step\n0.5,0,100\n0.4", encoding="utf-8")  # cut mid-row
+    assert latest_step(tmp_path) == 100
+
+
+@pytest.mark.parametrize("steps, expected", [(1500, 300), (1000, 200), (250, 250), (100, 100), (1234, 1234)])
+def test_checkpoint_interval_always_lands_on_the_last_step(steps, expected):
+    from samplegen.training import checkpoint_interval
+    every = checkpoint_interval(steps)
+    assert every == expected and steps % every == 0
+
+
+def test_scan_folder_ignores_a_folder_named_like_a_caption(tmp_path):
+    wav(tmp_path / "set" / "kick.wav")
+    (tmp_path / "set" / "kick.txt").mkdir()  # a directory, not a caption file
+    assert [c.caption for c in scan_folder(tmp_path / "set")] == ["kick"]
+
+
+def test_unreadable_sound_is_skipped_not_fatal(setup, tmp_path):
+    manager, _, clips, _ = setup
+    broken = tmp_path / "in" / "broken.wav"
+    broken.write_bytes(b"not audio at all")
+    count = manager._prepare_dataset([*clips, Clip(broken, "oops")], "", tmp_path / "data")
+    assert count == len(clips)
+
+
+def test_expired_token_gets_a_clear_message(tmp_path):
+    from samplegen.training import explain_failure
+    path = tmp_path / "train.log"
+    path.write_text("huggingface_hub.errors.HfHubHTTPError: 401 Client Error: Unauthorized", encoding="utf-8")
+    assert "not logged in" in explain_failure(path)

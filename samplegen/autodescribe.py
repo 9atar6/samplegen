@@ -11,10 +11,12 @@ still get the file-name clues and the measurements.
 
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -142,6 +144,7 @@ class Describer:
         self.script = Path(script)
         self.log_path = Path(log_path) if log_path else None
         self._run = runner
+        self._one_at_a_time = threading.Lock()
 
     @property
     def clap_available(self) -> bool:
@@ -155,10 +158,14 @@ class Describer:
             listing = Path(tmp) / "files.json"
             listing.write_text(json.dumps([str(p) for p in paths]), encoding="utf-8")
             command = [str(self.python), str(self.script), "--files", str(listing)] + (["--cpu"] if cpu else [])
+            # The child must print UTF-8 too: by default Windows pipes use cp1252, which mangles
+            # "é" in paths and crashes outright on Japanese or emoji file names.
+            env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
             try:
-                done = self._run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                 timeout=CLAP_TIMEOUT_SECONDS, cwd=str(self.script.parent),
-                                 creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                with self._one_at_a_time:  # two CLAP models at once would fight over memory
+                    done = self._run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                     timeout=CLAP_TIMEOUT_SECONDS, cwd=str(self.script.parent), env=env,
+                                     creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 log.warning("CLAP tagging failed to run: %s", exc)
                 return {}

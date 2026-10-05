@@ -8,13 +8,20 @@ import { drawWaveform, forgetPeaks } from "./waveform.js";
 
 // Rows don't keep their decoded audio: the waveform is drawn from cached peaks, and the
 // audio itself lives in the player's small LRU cache, so memory stays flat in long sessions.
-const rows = new Map(); // sampleId -> { el, record, canvas, duration, loading }
+// The same sample can be on screen twice (Generate feed + Library), so an id maps to a set of rows.
+const rows = new Map(); // sampleId -> Set<{ el, record, canvas, duration, loading }>
+const rowOfElement = new WeakMap();
+
+function rowsOf(id) {
+  return rows.get(id) ?? new Set();
+}
 
 const observer = new IntersectionObserver((entries) => {
   for (const entry of entries) {
     if (!entry.isIntersecting) continue;
     observer.unobserve(entry.target);
-    loadWave(entry.target.dataset.id);
+    const row = rowOfElement.get(entry.target);
+    if (row) loadWave(row);
   }
 }, { rootMargin: "200px" });
 
@@ -86,26 +93,29 @@ function fileName(record) {
   return record.rel_path.split("/").pop();
 }
 
-async function loadWave(id) {
-  const row = rows.get(id);
-  if (!row || row.loading) return;
+async function loadWave(row) {
+  if (row.loading) return;
   row.loading = true;
+  const id = row.record.id;
   try {
     const buffer = await player.loadBuffer(id);
     row.duration = buffer.duration;
+    row.el.classList.remove("broken");
     if (row.el.isConnected) drawWaveform(row.canvas, id, buffer, player.progress(id));
   } catch {
     row.el.classList.add("broken");
+    row.el.title = "Couldn't load this sound — click its waveform to retry.";
   } finally {
     row.loading = false;
   }
 }
 
 export function redraw(id) {
-  const row = rows.get(id);
-  if (!row || row.duration == null || !row.el.isConnected) return;
-  // No peaks for this width yet (e.g. after a resize): fetch the audio again to compute them.
-  if (!drawWaveform(row.canvas, id, null, player.progress(id))) loadWave(id);
+  for (const row of rowsOf(id)) {
+    if (row.duration == null || !row.el.isConnected) continue;
+    // No peaks for this width yet (e.g. after a resize): fetch the audio again to compute them.
+    if (!drawWaveform(row.canvas, id, null, player.progress(id))) loadWave(row);
+  }
 }
 
 export function createSampleRow(record, { onChange } = {}) {
@@ -139,7 +149,9 @@ export function createSampleRow(record, { onChange } = {}) {
   el.append(playBtn, canvas, info, actions);
 
   const row = { el, record, canvas, duration: null, loading: false };
-  rows.set(record.id, row);
+  if (!rows.has(record.id)) rows.set(record.id, new Set());
+  rows.get(record.id).add(row);
+  rowOfElement.set(el, row);
 
   const render = () => {
     const r = row.record;
@@ -190,6 +202,7 @@ export function createSampleRow(record, { onChange } = {}) {
   canvas.addEventListener("click", (e) => {
     const rect = canvas.getBoundingClientRect();
     const fraction = (e.clientX - rect.left) / rect.width;
+    if (el.classList.contains("broken")) loadWave(row); // retry a sound that failed to load
     const duration = row.duration || 0;
     player.play(record.id, { offset: fraction * duration, loop: isLooping(row.record) });
     el.focus();
@@ -207,29 +220,43 @@ export function createSampleRow(record, { onChange } = {}) {
   return el;
 }
 
-export function removeRow(id) {
-  const row = rows.get(id);
-  if (!row) return;
-  if (player.isPlaying(id)) player.stop();
-  const next = row.el.nextElementSibling;
-  if (next && next.classList.contains("sample-editor")) next.remove();
-  observer.unobserve(row.el);
-  row.el.remove();
-  rows.delete(id);
-  player.forget(id);
-  forgetPeaks(id);
+// Remove the rows of `id` inside `within` (e.g. the Library list), leaving any copy elsewhere alone.
+export function removeRow(id, within = document) {
+  const set = rowsOf(id);
+  for (const row of [...set]) {
+    if (!within.contains(row.el)) continue;
+    const next = row.el.nextElementSibling;
+    if (next && next.classList.contains("sample-editor")) next.remove();
+    if (row.el.contains(document.activeElement)) {
+      // Keep the keyboard user's place: focus the neighbour instead of dropping to <body>.
+      const neighbour = [row.el.nextElementSibling, row.el.previousElementSibling]
+        .find((n) => n && n.classList.contains("sample"));
+      neighbour?.focus({ preventScroll: false });
+    }
+    observer.unobserve(row.el);
+    row.el.remove();
+    set.delete(row);
+  }
+  if (set.size === 0) {
+    rows.delete(id);
+    if (player.isPlaying(id)) player.stop();
+    player.forget(id);
+    forgetPeaks(id);
+  }
 }
 
 // Redraw the playing row every frame; update play buttons on start/stop.
 let playingId = null;
 player.onChange((id) => {
-  for (const [rid, row] of rows) {
-    row.el.classList.toggle("playing", rid === id);
-    const play = row.el.querySelector(".play");
-    const wanted = rid === id ? "stop" : "play";
-    if (play.dataset.glyph !== wanted) {
-      play.dataset.glyph = wanted;
-      play.innerHTML = icon(wanted);
+  for (const [rid, set] of rows) {
+    for (const row of set) {
+      row.el.classList.toggle("playing", rid === id);
+      const play = row.el.querySelector(".play");
+      const wanted = rid === id ? "stop" : "play";
+      if (play.dataset.glyph !== wanted) {
+        play.dataset.glyph = wanted;
+        play.innerHTML = icon(wanted);
+      }
     }
     if (rid !== id) redraw(rid);
   }

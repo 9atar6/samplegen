@@ -96,6 +96,7 @@ def analyze(audio: np.ndarray, sr: int) -> Features:
     crest = float(np.abs(mono[raw_peak]) / rms) if rms > 0 else 0.0
 
     whole = mono[onset: onset + int(min(length, 2.0) * sr)]
+    whole = (whole - whole.mean()) * np.hanning(len(whole))  # DC and edge leakage aren't "sub"
     spec = np.abs(np.fft.rfft(whole)) ** 2
     freqs = np.fft.rfftfreq(len(whole), 1 / sr)
     total = float(spec.sum()) or 1e-12

@@ -326,7 +326,13 @@ function readForm() {
 
 function applyForm(saved) {
   if (!saved) return setMode("sfx");
-  const set = (sel, v) => { if (v !== undefined && v !== null) $(sel).value = v; };
+  const set = (sel, v) => {
+    if (v === undefined || v === null) return;
+    const el = $(sel);
+    // A <select> given a value it no longer offers ends up blank (and Generate then fails): keep its default.
+    if (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === String(v))) return;
+    el.value = v;
+  };
   const known = state.catalog.models.some((m) => m.modes.includes(saved.mode));
   setMode(known ? saved.mode : "sfx", saved.model);
   for (const [sel, key] of [["#prompt", "prompt"], ["#negative", "negative_prompt"], ["#duration", "duration"],
@@ -423,8 +429,12 @@ function focusedRow() {
   return document.activeElement?.closest?.(".sample") ?? null;
 }
 
+function visibleRows() {
+  return [...document.querySelectorAll(".view:not([hidden]) .sample:not(.skeleton)")];
+}
+
 function moveFocus(delta) {
-  const visible = [...document.querySelectorAll(".view:not([hidden]) .sample")];
+  const visible = visibleRows();
   if (!visible.length) return;
   const idx = visible.indexOf(focusedRow());
   const next = visible[Math.max(0, Math.min(visible.length - 1, idx + delta))] ?? visible[0];
@@ -436,16 +446,21 @@ const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "s
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if ($("#view-generate").hidden) return; // the form isn't on screen: don't generate blind
     e.preventDefault();
     $("#gen-form").requestSubmit();
     return;
   }
   if (e.target.matches?.("input, textarea, select") || e.ctrlKey || e.metaKey || e.altKey) return;
-  const actions = focusedRow()?.sampleActions;
+  const row = focusedRow();
+  const actions = row?.sampleActions;
+  // Space/Enter on a focused button (Keep, Trash...) should press that button, not play.
+  const onButton = e.target.closest?.("button") && e.target !== row;
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    if (!visibleRows().length) return;
     e.preventDefault();
     moveFocus(e.key === "ArrowDown" ? 1 : -1);
-  } else if (e.key === " " && actions) {
+  } else if (e.key === " " && actions && !onButton) {
     e.preventDefault();
     actions.toggle();
   } else if (e.key === "Escape") {

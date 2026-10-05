@@ -1,5 +1,6 @@
 """One generation request -> engine run -> post-processed samples in the library."""
 
+import logging
 import math
 import random
 import re
@@ -35,6 +36,7 @@ INPUT_SUBDIR = "samplegen"
 __all__ = ["GenerationRequest", "Generator", "sample_name"]
 
 Finisher = Callable[[np.ndarray, int], np.ndarray]
+log = logging.getLogger("samplegen.generation")
 
 
 def read_engine_wav(path: Path) -> tuple[np.ndarray, int]:
@@ -114,10 +116,17 @@ class Generator:
         source_name = self.sources.get(request.source_id).name if request.uses_source else None
         name = sample_name(request, source_name)
         self.staging_dir.mkdir(parents=True, exist_ok=True)
-        records = []
+        records, errors = [], []
         for variation, output in enumerate(outputs, start=1):
-            raw_path = self._raw_output_path(output)
-            records.append(self._finish(request, prepared, raw_path, name, seed, variation, batch_id, job_id))
+            # One bad take (file in use, drive hiccup...) must not throw away the others.
+            try:
+                raw_path = self._raw_output_path(output)
+                records.append(self._finish(request, prepared, raw_path, name, seed, variation, batch_id, job_id))
+            except Exception as exc:  # noqa: BLE001 - reported below / in the log
+                log.exception("variation %d of job %s failed", variation, job_id)
+                errors.append(exc)
+        if errors and not records:
+            raise errors[0]
         return records
 
     # ---------- instruments ----------
@@ -290,7 +299,8 @@ class Generator:
         raw, sr = read_wav(raw_path)
         audio = prepared.finish(raw, sr)
         staged = self.staging_dir / f"{job_id}_{variation:02d}.wav"
-        write_wav(staged, audio, sr, request.export, title=name, comment=wav_comment(request, seed, variation))
+        write_wav(staged, audio, sr, request.export, title=name, comment=wav_comment(request, seed, variation),
+                  loop=request.is_loop or bool(prepared.params.get("loop")))
         raw_path.unlink(missing_ok=True)  # engine scratch output, now processed
         params = {
             "duration": len(audio) / sr, "variation": variation, "batch_size": request.variations,

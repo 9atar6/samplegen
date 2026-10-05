@@ -7,13 +7,18 @@ async function request(path, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   if (res.status === 204) return null;
+  return readResponse(res, "Request failed");
+}
+
+// The error carries the HTTP status so callers can tell "gone" (404) from "try again".
+async function readResponse(res, fallback) {
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const detail = data && data.detail;
     const message = typeof detail === "string" ? detail
       : Array.isArray(detail) ? detail.map((d) => d.msg).join("; ")
-      : `Request failed (${res.status})`;
-    throw new Error(message);
+      : `${fallback} (${res.status})`;
+    throw Object.assign(new Error(message), { status: res.status });
   }
   return data;
 }
@@ -48,9 +53,7 @@ export const api = {
       headers: { "Content-Type": "application/octet-stream" },
       body: file,
     });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error((data && data.detail) || `Upload failed (${res.status})`);
-    return data;
+    return readResponse(res, "Upload failed");
   },
   sourceFromSample: (id) => request(`/api/sources/from-sample/${id}`, { method: "POST" }),
   sourceAudioUrl: (id) => `/api/sources/${id}/audio`,

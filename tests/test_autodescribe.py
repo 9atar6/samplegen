@@ -111,6 +111,7 @@ def test_describer_runs_clap_and_composes(tmp_path):
 
     def fake_run(command, **kwargs):
         calls.append(command)
+        assert kwargs["env"]["PYTHONIOENCODING"] == "utf-8"  # accented / Japanese paths survive the pipe
         listed = json.loads(Path(command[command.index("--files") + 1]).read_text(encoding="utf-8"))
         rows = [{"file": Path(p).name, "path": p, "category": [["kick drum", 0.4], ["snare drum", 0.2]]} for p in listed]
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(rows), stderr="[clap] done")

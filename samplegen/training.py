@@ -39,7 +39,8 @@ MAX_CAPTION_CHARS = 400
 LOG_TAIL_LINES = 12
 POLL_SECONDS = 2.0
 CREATE_NO_WINDOW = 0x08000000
-NATIVE = ExportFormat(sample_rate=SAMPLE_RATE, bit_depth="32f")
+# 24-bit is plenty for training data and a quarter smaller than float (500 clips x 30 s add up).
+DATASET_FORMAT = ExportFormat(sample_rate=SAMPLE_RATE, bit_depth="24")
 
 
 @dataclass(frozen=True)
@@ -87,14 +88,22 @@ def scan_folder(folder: Path, limit: int = MAX_CLIPS) -> list[Clip]:
     if not folder.is_dir():
         raise ValueError(f"{folder} isn't a folder.")
     clips = []
-    for path in sorted(folder.rglob("*")):
-        if path.suffix.lower() not in AUDIO_EXTENSIONS or not path.is_file():
-            continue
-        sidecar = path.with_suffix(".txt")
-        caption = sidecar.read_text(encoding="utf-8", errors="replace") if sidecar.exists() else caption_from_filename(path)
-        clips.append(Clip(path, clean_caption(caption)))
-        if len(clips) >= limit:
-            break
+    # os.walk, not sorted(rglob): stops as soon as there are enough sounds instead of
+    # listing a whole drive first (someone will point it at E:\).
+    for root, dirs, files in os.walk(folder):
+        dirs.sort()
+        for name in sorted(files):
+            path = Path(root) / name
+            if path.suffix.lower() not in AUDIO_EXTENSIONS:
+                continue
+            sidecar = path.with_suffix(".txt")
+            try:
+                caption = sidecar.read_text(encoding="utf-8", errors="replace") if sidecar.is_file() else None
+            except OSError:
+                caption = None
+            clips.append(Clip(path, clean_caption(caption or caption_from_filename(path))))
+            if len(clips) >= limit:
+                return clips
     return clips
 
 
@@ -103,13 +112,21 @@ def latest_step(save_dir: Path) -> int:
     best = 0
     for metrics in Path(save_dir).glob("lightning_logs/version_*/metrics.csv"):
         try:
-            with open(metrics, newline="", encoding="utf-8") as f:
+            with open(metrics, newline="", encoding="utf-8", errors="replace") as f:
                 for row in csv.DictReader(f):
-                    if row.get("step", "").strip().isdigit():
-                        best = max(best, int(row["step"]))
-        except OSError:
+                    step = str(row.get("step") or "").strip()  # None on a half-written last row
+                    if step.isdigit():
+                        best = max(best, int(step))
+        except (OSError, csv.Error):
             continue
     return best
+
+
+def checkpoint_interval(steps: int) -> int:
+    """About 5 checkpoints, at an interval that divides `steps`: the trainer only saves on
+    multiples of it, and the style must be made from the last step, not one 30 steps short."""
+    target = max(100, steps // 5)
+    return max((d for d in range(100, target + 1, 100) if steps % d == 0), default=steps)
 
 
 def final_checkpoint(save_dir: Path) -> Path | None:
@@ -151,6 +168,9 @@ def explain_failure(log_path: Path) -> str | None:
     if missing:
         return (f"The trainer is missing the Python package '{missing.group(1)}'. Close samplegen, run "
                 "tools/install-training.bat, then start the training again.")
+    if re.search(r"\b401\b|Invalid (user )?token|GatedRepoError|Repository Not Found", text):
+        return ("Hugging Face refused the download: you're not logged in, the token expired, or a license "
+                "isn't accepted. Run tools/install-training.bat again (it checks all of this), then retry.")
     if "CUDA out of memory" in text or "OutOfMemoryError" in text:
         return "The GPU ran out of memory. Close other GPU-heavy apps, or use fewer / shorter sounds."
     return None
@@ -226,8 +246,11 @@ class TrainingManager:
         return self._run
 
     def stop(self) -> TrainingRun:
-        self._stop_requested = True
-        process = self._process
+        with self._lock:
+            if self._run.state == "converting":
+                return self._run  # a few seconds from done: cutting it would only leave a broken file
+            self._stop_requested = True
+            process = self._process
         if process and process.poll() is None:
             process.terminate()
         return self._run
@@ -268,21 +291,29 @@ class TrainingManager:
         max_frames = int(MAX_CLIP_SECONDS * SAMPLE_RATE)
         count = 0
         for index, clip in enumerate(clips):
-            audio, sr = read_wav(clip.path)  # soundfile reads wav/aiff/flac/ogg/mp3
-            audio = to_native(audio, sr)[:max_frames]
+            if self._stop_requested:
+                break
+            try:
+                audio, sr = read_wav(clip.path)  # soundfile reads wav/aiff/flac/ogg/mp3
+                audio = to_native(audio, sr)[:max_frames]
+            except Exception as exc:  # noqa: BLE001 - one unreadable file mustn't sink the whole run
+                log.warning("skipping %s: %s", clip.path, exc)
+                continue
             if audio.size == 0 or not np.isfinite(audio).all():
                 continue
             stem = f"clip{index:04d}"
-            write_wav(data_dir / f"{stem}.wav", audio, SAMPLE_RATE, NATIVE)
+            write_wav(data_dir / f"{stem}.wav", audio, SAMPLE_RATE, DATASET_FORMAT)
             caption = clean_caption(f"{description}, {clip.caption}" if description else clip.caption)
             (data_dir / f"{stem}.txt").write_text(caption, encoding="utf-8")
             count += 1
+        if self._stop_requested:
+            return count
         if count < MIN_CLIPS:
             raise ValueError(f"Only {count} usable sounds; at least {MIN_CLIPS} are needed.")
         return count
 
     def train_command(self, base: str, data_dir: Path, save_dir: Path, steps: int, rank: int, slug: str) -> list[str]:
-        every = max(100, steps // 5)
+        every = checkpoint_interval(steps)
         return [
             str(self.python), "scripts/train_lora.py",
             "--model", TRAINER_MODELS[base], "--data_dir", str(data_dir), "--save_dir", str(save_dir),
@@ -308,11 +339,19 @@ class TrainingManager:
         return process
 
     def _train(self, base, data_dir, save_dir, log_path, steps, rank, slug) -> int:
-        self._process = self._spawn(self.train_command(base, data_dir, save_dir, steps, rank, slug), log_path)
-        while self._process.poll() is None:
-            self._set(step=min(steps, latest_step(save_dir)), log_tail=tail(log_path))
-            time.sleep(POLL_SECONDS)
-        return self._process.returncode
+        process = self._spawn(self.train_command(base, data_dir, save_dir, steps, rank, slug), log_path)
+        with self._lock:
+            self._process = process
+        try:
+            while process.poll() is None:
+                if self._stop_requested:  # also catches a Stop pressed while the trainer was starting
+                    process.terminate()
+                self._set(step=min(steps, latest_step(save_dir)), log_tail=tail(log_path))
+                time.sleep(POLL_SECONDS)
+            return process.returncode
+        finally:
+            if process.poll() is None:  # never leave a trainer holding the GPU behind
+                process.terminate()
 
     def _convert(self, save_dir: Path, base_ckpt: Path, slug: str, log_path: Path) -> None:
         ckpt = final_checkpoint(save_dir)

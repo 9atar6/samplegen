@@ -7,6 +7,7 @@ import { drawWaveform } from "./waveform.js";
 
 const $ = (sel) => document.querySelector(sel);
 const MIN_SELECTION_S = 0.1;
+const DRAG_START_PX = 4;
 
 const state = { source: null, buffer: null, selection: null, selectable: false, dragging: null };
 let onChangeHandler = () => {};
@@ -63,32 +64,38 @@ function timeAt(event) {
 function bindCanvas() {
   const canvas = $("#source-wave");
   canvas.addEventListener("pointerdown", (e) => {
-    if (!state.source) return;
+    if (!state.source || e.button !== 0) return;
     canvas.setPointerCapture(e.pointerId);
-    state.dragging = { from: timeAt(e), moved: false };
+    state.dragging = { from: timeAt(e), x: e.clientX, moved: false, previous: state.selection };
   });
   canvas.addEventListener("pointermove", (e) => {
     if (!state.dragging || !state.selectable) return;
+    // A drag starts after a few pixels, not 20 ms: on a long source 1 px of hand jitter is more than that.
+    if (!state.dragging.moved && Math.abs(e.clientX - state.dragging.x) < DRAG_START_PX) return;
     const to = timeAt(e);
-    if (Math.abs(to - state.dragging.from) < 0.02) return;
     state.dragging.moved = true;
     state.selection = { start: Math.min(state.dragging.from, to), end: Math.max(state.dragging.from, to) };
     redraw();
     updateSelectionLabel();
   });
-  canvas.addEventListener("pointerup", () => {
+  const endDrag = (cancelled) => {
     const drag = state.dragging;
     state.dragging = null;
     if (!drag) return;
     if (!drag.moved) {
-      player.play(key(), { offset: drag.from, loop: state.source.is_loop, url: api.sourceAudioUrl(state.source.id) });
+      if (!cancelled) player.play(key(), { offset: drag.from, loop: state.source.is_loop, url: api.sourceAudioUrl(state.source.id) });
       return;
     }
-    if (state.selection && state.selection.end - state.selection.start < MIN_SELECTION_S) state.selection = null;
+    // Too short to regenerate (or interrupted): keep the selection you had before.
+    if (cancelled || !state.selection || state.selection.end - state.selection.start < MIN_SELECTION_S) {
+      state.selection = drag.previous;
+    }
     redraw();
     updateSelectionLabel();
     onChangeHandler();
-  });
+  };
+  canvas.addEventListener("pointerup", () => endDrag(false));
+  canvas.addEventListener("pointercancel", () => endDrag(true)); // touch scroll took over
 }
 
 async function loadFile(file) {
@@ -117,6 +124,12 @@ function bindDropzone() {
     if (input.files[0]) loadFile(input.files[0]);
     input.value = "";
   });
+  // A file dropped anywhere else would make the browser open it and leave samplegen.
+  for (const type of ["dragover", "drop"]) {
+    window.addEventListener(type, (e) => {
+      if ([...(e.dataTransfer?.types || [])].includes("Files")) e.preventDefault();
+    });
+  }
   for (const target of [zone, $("#source-panel")]) {
     target.addEventListener("dragover", (e) => {
       if (![...e.dataTransfer.types].includes("Files")) return;
