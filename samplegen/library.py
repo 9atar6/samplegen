@@ -21,10 +21,12 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
+import soundfile as sf
+
 STATUSES = ("new", "kept", "trashed")
 KEPT_FOLDERS = {
     "sfx": "SFX", "loop": "Loops", "free": "Music", "transform": "Transformed", "edit": "Edited",
-    "stems": "Stems", "instrument": "Instruments",
+    "stems": "Stems", "instrument": "Instruments", "performance": "Performances", "recovered": "Recovered",
 }
 SIDECARS = (".mid",)  # files that belong to a sample and move with it
 MAX_SLUG_LENGTH = 60
@@ -182,8 +184,11 @@ class Library:
 
     def list(self, status: str | None = None, favorite: bool | None = None, query: str | None = None,
              batch_id: str | None = None, tag: str | None = None, limit: int = 200,
-             offset: int = 0) -> list[SampleRecord]:
+             offset: int = 0, mode: str | None = None) -> list[SampleRecord]:
         clauses, args = [], []
+        if mode:
+            clauses.append("mode = ?")
+            args.append(mode)
         if status is None:
             clauses.append("status != 'trashed'")
         else:
@@ -304,6 +309,46 @@ class Library:
                     os.replace(extra, dest.with_suffix(ext))
                 except OSError:
                     pass  # the sample itself moved; a sidecar left behind can be made again
+
+    def repair(self, staging: Path | None = None, min_age_s: float = 120.0) -> dict[str, int]:
+        """After a crash or a drive pulled mid-move: re-link samples whose file moved, and turn
+        finished-but-never-indexed takes left in staging into "Recovered" samples.
+
+        Every library file name ends in _<id>.wav, so a sample is found wherever it landed.
+        """
+        found = {}
+        for top in ("Inbox", "Kept", "_trash"):
+            for path in (self.root / top).rglob("*_*.wav") if (self.root / top).is_dir() else ():
+                found.setdefault(path.stem.rsplit("_", 1)[-1], path)
+        relinked = 0
+        with self._lock:
+            rows = self._db.execute("SELECT id, rel_path FROM samples").fetchall()
+            for row in rows:
+                if (self.root / row["rel_path"]).exists() or row["id"] not in found:
+                    continue
+                path = found[row["id"]]
+                rel = path.relative_to(self.root)
+                status = {"Kept": "kept", "_trash": "trashed"}.get(rel.parts[0], "new")
+                self._db.execute("UPDATE samples SET rel_path = ?, status = ? WHERE id = ?",
+                                 (rel.as_posix(), status, row["id"]))
+                relinked += 1
+            self._db.commit()
+        recovered = 0
+        cutoff = datetime.now().timestamp() - min_age_s
+        for path in sorted(Path(staging).glob("*.wav")) if staging and Path(staging).is_dir() else ():
+            if path.stat().st_mtime > cutoff:
+                continue  # may still belong to a job that's finishing
+            try:
+                info = sf.info(str(path))
+            except Exception:  # noqa: BLE001 - half-written file: leave it for a human to look at
+                continue
+            duration = info.frames / info.samplerate if info.samplerate else 0.0
+            self.add(path, NewSample(mode="recovered", model="unknown", prompt="recovered after an interruption",
+                                     negative_prompt="", seed=0, params={"recovered_from": path.name},
+                                     duration=duration, sample_rate=info.samplerate, batch_id="recovered",
+                                     name="Recovered take"))
+            recovered += 1
+        return {"relinked": relinked, "recovered": recovered}
 
     def midi_path(self, record: SampleRecord) -> Path:
         return self.path_of(record).with_suffix(".mid")

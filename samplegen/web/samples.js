@@ -36,6 +36,7 @@ function describe(record) {
   if (record.mode === "loop") base = `${p.bpm} BPM · ${p.key} · ${p.bars} bars · seed ${record.seed}`;
   else if (record.mode === "instrument") base = `instrument · ${p.low_note}–${p.high_note} · ${p.notes} notes · ⤴ opens it`;
   else if (record.mode === "stems") base = `${p.stem} stem · ${formatSeconds(record.duration)}`;
+  else if (record.mode === "performance" || record.mode === "recovered") base = `${record.prompt} · ${formatSeconds(record.duration)}`;
   else base = `${formatSeconds(record.duration)} · seed ${record.seed}`;
   return tags ? `${base} · ${tags}` : base;
 }

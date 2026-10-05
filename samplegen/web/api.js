@@ -10,6 +10,13 @@ async function request(path, options = {}) {
   return readResponse(res, "Request failed");
 }
 
+// A raw body (audio, MIDI) instead of JSON.
+async function sendRaw(path, body, type, fallback, method = "POST") {
+  const res = await fetch(path, { method, headers: { "Content-Type": type }, body });
+  if (res.status === 204) return null;
+  return readResponse(res, fallback);
+}
+
 // The error carries the HTTP status so callers can tell "gone" (404) from "try again".
 async function readResponse(res, fallback) {
   const data = await res.json().catch(() => null);
@@ -40,6 +47,12 @@ export const api = {
   exportPack: (body) => request("/api/packs", { method: "POST", body }),
   stems: (id, exportFormat) => request(`/api/samples/${id}/stems`, { method: "POST", body: { export: exportFormat } }),
   midi: (id) => request(`/api/samples/${id}/midi`, { method: "POST" }),
+  instruments: () => request("/api/instruments"),
+  instrumentDetail: (id) => request(`/api/instruments/${id}`),
+  hum: (wav) => sendRaw("/api/midi/hum", wav, "audio/wav", "Couldn't read the melody"),
+  savePerformance: (wav, { name, instrument, bpm }) =>
+    sendRaw(`/api/performances?${new URLSearchParams({ name, instrument, bpm })}`, wav, "audio/wav", "Couldn't save the take"),
+  attachMidi: (id, bytes) => sendRaw(`/api/samples/${id}/midi`, bytes, "audio/midi", "Couldn't save the MIDI", "PUT"),
   instrument: (body) => request("/api/instruments", { method: "POST", body }),
   styles: () => request("/api/styles"),
   training: () => request("/api/training"),

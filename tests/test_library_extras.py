@@ -155,3 +155,25 @@ def test_export_pack_skips_missing_and_rejects_empty(lib, tmp_path):
     assert export_pack(lib, [a], "P").missing == 1
     with pytest.raises(ValueError):
         export_pack(lib, [], "P")
+
+
+def test_repair_relinks_samples_moved_by_an_interrupted_move(lib, tmp_path):
+    record = add(lib, tmp_path, "boom")
+    kept_dir = lib.root / "Kept" / "SFX"
+    kept_dir.mkdir(parents=True)
+    lib.path_of(record).replace(kept_dir / lib.path_of(record).name)  # file moved, DB never updated
+    assert lib.repair() == {"relinked": 1, "recovered": 0}
+    fixed = lib.get(record.id)
+    assert fixed.status == "kept" and lib.path_of(fixed).exists()
+
+
+def test_repair_recovers_finished_takes_left_in_staging(lib, tmp_path):
+    staging = lib.root / "_staging"
+    staging.mkdir()
+    sf.write(str(staging / "job1_01.wav"), np.zeros((4410, 2)), 44100, subtype="FLOAT")
+    (staging / "half.wav").write_bytes(b"RIFF....")  # unreadable: left alone
+    result = lib.repair(staging=staging, min_age_s=-60)  # no waiting in tests
+    assert result == {"relinked": 0, "recovered": 1}
+    (recovered,) = lib.list()
+    assert recovered.name == "Recovered take" and lib.path_of(recovered).exists()
+    assert (staging / "half.wav").exists()

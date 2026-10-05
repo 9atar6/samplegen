@@ -36,6 +36,14 @@ class Transcriber:
 
     def transcribe(self, audio: Path, out: Path, bpm: float | None = None) -> int:
         """Write `out` (.mid) from `audio`; returns the number of notes found."""
+        return int(self.run(audio, out, bpm).get("notes", 0))
+
+    def notes(self, audio: Path, out: Path) -> list[list[float]]:
+        """[[start_s, end_s, midi, velocity 0-1], ...] sung/played in `audio` (also writes `out`)."""
+        events = self.run(audio, out).get("events", [])
+        return [e for e in events if isinstance(e, list) and len(e) == 4]
+
+    def run(self, audio: Path, out: Path, bpm: float | None = None) -> dict:
         if not self.available:
             raise MidiError(NOT_INSTALLED)
         command = [str(self.python), str(self.script), "--audio", str(audio), "--out", str(out)]
@@ -60,4 +68,4 @@ class Transcriber:
             raise MidiError("MIDI extraction returned nothing usable.") from exc
         if not Path(out).exists():
             raise MidiError("MIDI extraction didn't write a file.")
-        return int(result.get("notes", 0))
+        return result if isinstance(result, dict) else {}

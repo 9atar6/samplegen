@@ -51,6 +51,16 @@ def main() -> int:
         return 1
 
     library = Library(settings.library_dir)
+
+    def repair_library():
+        try:
+            fixed = library.repair(staging=settings.library_dir / "_staging")
+            if any(fixed.values()):
+                log.info("library repaired: %(relinked)d re-linked, %(recovered)d recovered takes", fixed)
+        except Exception:  # never stop the app over a repair pass
+            log.exception("library repair failed")
+
+    threading.Thread(target=repair_library, name="library-repair", daemon=True).start()
     sources = SourceStore(settings.library_dir)
     styles = StyleStore(settings.engine_dir / "ComfyUI" / "models" / "loras")
     client = ComfyClient(settings.comfy_url)

@@ -5,7 +5,7 @@ basic-pitch needs older libraries than the app. samplegen calls it as a subproce
 
     python transcribe.py --audio loop.wav --out loop.mid [--bpm 140]
 
-Prints one JSON line on success: {"notes": <count>, "out": "<path>"}.
+Prints one JSON line on success: {"notes": <count>, "out": "<path>", "events": [[start, end, pitch, velocity], ...]}.
 """
 
 import argparse
@@ -37,7 +37,10 @@ def main(argv=None) -> int:
     tmp = out.with_name(out.name + ".part")
     midi.write(str(tmp))
     tmp.replace(out)
-    print(json.dumps({"notes": len(notes), "out": str(out)}))
+    # The notes themselves too (start s, end s, MIDI pitch, velocity 0-1): the Play tab plays them directly.
+    events = sorted([round(float(s), 4), round(float(e), 4), int(p), round(min(1.0, float(a)), 3)]
+                    for s, e, p, a, *_ in notes)
+    print(json.dumps({"notes": len(notes), "out": str(out), "events": events}))
     return 0
 
 

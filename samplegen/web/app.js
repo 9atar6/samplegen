@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { initFeed, track } from "./feed.js";
 import { icon } from "./icons.js";
 import { initLibrary, showLibrary } from "./library.js";
+import { hidePlay, initPlay, showPlay } from "./play.js";
 import { toast } from "./toast.js";
 import * as player from "./player.js";
 import * as sourcePanel from "./source.js";
@@ -29,7 +30,7 @@ const PROMPT_COPY = {
 const STYLE_MODES = ["sfx", "free"];
 const SEAMLESS_MODES = ["sfx", "free"];
 const MIN_SEAMLESS_SECONDS = 6;
-const VIEWS = ["generate", "library", "train"];
+const VIEWS = ["generate", "library", "play", "train"];
 
 const state = { catalog: null, mode: "sfx", scale: "minor", editOp: "inpaint", space: "Dry", styles: [] };
 
@@ -430,6 +431,8 @@ function showView(name) {
   player.stop();
   if (name === "library") showLibrary();
   if (name === "train") showTrain();
+  if (name === "play") showPlay();
+  else hidePlay();
 }
 
 // ---------- keyboard ----------
@@ -549,6 +552,7 @@ async function init() {
     }
   });
   initTrain();
+  initPlay();
   for (const chip of document.querySelectorAll("#try-prompts .chip")) {
     chip.addEventListener("click", () => {
       if (state.mode !== "sfx") setMode("sfx");

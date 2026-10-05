@@ -23,6 +23,7 @@
       <span class="tab-ink" aria-hidden="true"></span>
       <button class="tab active" data-view="generate" role="tab"><span data-icon="spark"></span>Generate</button>
       <button class="tab" data-view="library" role="tab"><span data-icon="folder"></span>Library</button>
+      <button class="tab" data-view="play" role="tab"><span data-icon="keys"></span>Play</button>
       <button class="tab" data-view="train" role="tab"><span data-icon="wave"></span>Train</button>
     </nav>
     <div class="topbar-right">
@@ -368,6 +369,52 @@
             <div class="style-list" id="style-list"><p class="hint">No styles yet.</p></div>
           </section>
         </div>
+      </div>
+    </section>
+    <!-- ============ PLAY ============ -->
+    <section class="view" id="view-play" hidden>
+      <div class="deck">
+        <div class="deck-scroll">
+          <section class="deck-section">
+            <h2 class="deck-label"><span>01</span>Instrument</h2>
+            <label class="field"><span>Play</span><select id="play-instrument"></select></label>
+            <p class="hint" id="play-load-status"></p>
+            <p class="hint" id="play-no-instruments" hidden>No instruments yet. Make one in <b>Generate → Instrument</b>, then come back to play it.</p>
+          </section>
+          <section class="deck-section">
+            <h2 class="deck-label"><span>02</span>Input</h2>
+            <div class="midi-status" id="midi-status"><i class="led"></i><span id="midi-label">MIDI keyboard: not connected</span></div>
+            <button type="button" class="ghost" id="midi-connect"><span data-icon="keys"></span><span>Connect MIDI keyboard</span></button>
+            <p class="hint">Computer keys: <kbd>A</kbd>–<kbd>K</kbd> play (<kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> sharps), <kbd>Z</kbd>/<kbd>X</kbd> octave · <span id="play-octave">C4</span></p>
+            <label class="field"><span>Volume <output id="play-volume-out">80%</output></span><input type="range" id="play-volume" min="0" max="1" step="0.01" value="0.8"></label>
+            <label class="field"><span>Release <output id="play-release-out">0.6 s</output></span><input type="range" id="play-release" min="0.05" max="4" step="0.05" value="0.6"></label>
+          </section>
+          <section class="deck-section">
+            <h2 class="deck-label"><span>03</span>Take</h2>
+            <div class="take-buttons">
+              <button type="button" class="ghost record-btn" id="take-record" aria-pressed="false"><i class="rec-dot" aria-hidden="true"></i><span>Record</span></button>
+              <button type="button" class="ghost" id="take-play"><span data-icon="play"></span><span>Play</span></button>
+              <button type="button" class="ghost" id="take-clear" title="Clear the take"><span data-icon="x"></span></button>
+            </div>
+            <button type="button" class="ghost record-btn" id="take-hum" aria-pressed="false"><i class="rec-dot" aria-hidden="true"></i><span id="take-hum-label">Hum a melody</span></button>
+            <button type="button" class="ghost" id="take-load"><span data-icon="midi"></span><span>Load a MIDI file…</span></button>
+            <input type="file" id="take-file" accept=".mid,.midi,audio/midi" hidden>
+            <p class="hint">Tip: drag a sample's <b>♪</b> button (after extracting its MIDI) onto the keyboard to play its notes here.</p>
+            <p class="hint" id="take-info">No take yet.</p>
+            <div class="row2">
+              <label class="field"><span>Tempo <em>for the MIDI file</em></span><input type="number" id="take-bpm" value="120" min="20" max="300"></label>
+              <label class="field"><span>Name</span><input id="take-name" maxlength="120" placeholder="Night Keys"></label>
+            </div>
+            <div class="take-buttons">
+              <button type="button" class="ghost" id="take-save-midi"><span data-icon="download"></span><span>.mid</span></button>
+              <button type="button" class="primary small" id="take-save"><span data-icon="check"></span><span>Save to library</span></button>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="screen play-screen" id="play-drop">
+        <canvas class="roll" id="play-roll" aria-label="The take's notes"></canvas>
+        <div class="piano" id="play-piano"></div>
       </div>
     </section>
   </main>

@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .api_extras import add_extra_routes, open_in_explorer
+from .api_play import add_play_routes
 from .api_training import add_training_routes
 from .audio import ExportFormat
 from .autodescribe import Describer
@@ -234,6 +235,7 @@ def create_app(ctx: AppContext) -> FastAPI:
 
     add_extra_routes(app, ctx)
     add_training_routes(app, ctx)
+    add_play_routes(app, ctx)
 
     # ---------- sources (Transform / Edit) ----------
 
