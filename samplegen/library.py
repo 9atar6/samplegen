@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS samples (
     rel_path TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_samples_status ON samples(status, created_at);
+CREATE TABLE IF NOT EXISTS embeddings (
+    id TEXT PRIMARY KEY,
+    vec BLOB NOT NULL
+);
 """
 
 
@@ -349,6 +353,39 @@ class Library:
                                      name="Recovered take"))
             recovered += 1
         return {"relinked": relinked, "recovered": recovered}
+
+    # ---------- sound fingerprints (search by sound) ----------
+
+    def without_embedding(self, limit: int = 16) -> list[SampleRecord]:
+        """Samples (not trashed) that haven't been fingerprinted yet, newest first."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT s.* FROM samples s LEFT JOIN embeddings e ON e.id = s.id "
+                "WHERE e.id IS NULL AND s.status != 'trashed' ORDER BY s.created_at DESC LIMIT ?", (limit,),
+            ).fetchall()
+        return [_to_record(r) for r in rows]
+
+    def set_embedding(self, sample_id: str, vec: bytes) -> None:
+        with self._lock:
+            self._db.execute("INSERT OR REPLACE INTO embeddings (id, vec) VALUES (?, ?)", (sample_id, vec))
+            self._db.commit()
+
+    def embeddings(self) -> list[tuple[str, bytes]]:
+        """(id, vector bytes) of every fingerprinted sample that isn't trashed."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT e.id, e.vec FROM embeddings e JOIN samples s ON s.id = e.id WHERE s.status != 'trashed'"
+            ).fetchall()
+        return [(r["id"], r["vec"]) for r in rows]
+
+    def embedding_counts(self) -> tuple[int, int]:
+        """(fingerprinted, total) over samples that aren't trashed."""
+        with self._lock:
+            total = self._db.execute("SELECT COUNT(*) FROM samples WHERE status != 'trashed'").fetchone()[0]
+            done = self._db.execute(
+                "SELECT COUNT(*) FROM embeddings e JOIN samples s ON s.id = e.id WHERE s.status != 'trashed'"
+            ).fetchone()[0]
+        return done, total
 
     def midi_path(self, record: SampleRecord) -> Path:
         return self.path_of(record).with_suffix(".mid")

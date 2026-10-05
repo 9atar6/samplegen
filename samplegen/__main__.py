@@ -21,6 +21,7 @@ from .generation import Generator
 from .jobs import JobManager
 from .library import Library
 from .midi import Transcriber
+from .search import ClapWorker, SoundIndex, start_indexer
 from .sources import SourceStore
 from .styles import StyleStore
 from .training import TrainingManager
@@ -94,10 +95,17 @@ def main() -> int:
         describer = Describer(training.python, PROJECT_DIR / "trainer" / "clap_describe.py",
                               log_path=PROJECT_DIR / "logs" / "autodescribe.log")
         midi = Transcriber(PROJECT_DIR / "midi" / ".venv" / "Scripts" / "python.exe", PROJECT_DIR / "midi" / "transcribe.py")
-        context = AppContext(library, jobs, engine, sources, styles, training, describer, midi)
+        # Search by sound: CLAP from search/.venv (install-search.bat) or the trainer's Python.
+        clap = ClapWorker([PROJECT_DIR / "search" / ".venv" / "Scripts" / "python.exe", training.python],
+                          PROJECT_DIR / "trainer" / "clap_server.py", PROJECT_DIR / "logs" / "clap.log")
+        sound_index = SoundIndex(library, clap, busy=lambda: training.busy_reason() is not None)
+        start_indexer(sound_index)
+        context = AppContext(library, jobs, engine, sources, styles, training, describer, midi, sound_index)
         uvicorn.run(create_app(context), host="127.0.0.1",
                     port=settings.app_port, log_level="warning")
     finally:
+        if "sound_index" in locals():
+            sound_index.stop()
         jobs.stop()
         engine.stop()
         library.close()

@@ -3,7 +3,7 @@
 import { api } from "./api.js";
 import { initFeed, track } from "./feed.js";
 import { icon } from "./icons.js";
-import { initLibrary, showLibrary } from "./library.js";
+import { initLibrary, setSimilar, showLibrary } from "./library.js";
 import { hidePlay, initPlay, showPlay } from "./play.js";
 import { toast } from "./toast.js";
 import * as player from "./player.js";
@@ -453,7 +453,7 @@ function moveFocus(delta) {
   next.scrollIntoView({ block: "nearest" });
 }
 
-const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit", m: "midi" };
+const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit", m: "midi", l: "similar" };
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -537,6 +537,7 @@ async function init() {
   for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => showView(t.dataset.view));
   document.addEventListener("samplegen:use-source", (e) => useSampleAsSource(e.detail));
   document.addEventListener("samplegen:stems", (e) => splitStems(e.detail));
+  document.addEventListener("samplegen:similar", (e) => { setSimilar(e.detail); showView("library"); });
   document.addEventListener("samplegen:styles", (e) => {
     setStyles(e.detail, state.savedStyle);
     state.savedStyle = undefined;

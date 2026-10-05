@@ -14,6 +14,8 @@ export class Sampler {
     this.output.gain.value = 0.8;
     this.output.connect(ctx.destination);
     this.samples = new Map(); // midi -> AudioBuffer
+    this.loops = new Map(); // midi -> { start, end } in seconds (sustain loop, crossfade baked in)
+    this.hold = true; // held keys keep sounding through the loop
     this.roots = [];
     this.voices = new Map(); // midi -> voice
     this.sustained = new Set();
@@ -26,14 +28,23 @@ export class Sampler {
   async load(detail, onProgress) {
     this.allOff();
     const samples = new Map();
+    const loops = new Map();
     let done = 0;
     await Promise.all(detail.notes.map(async (note) => {
       const res = await fetch(note.url);
       if (!res.ok) throw new Error(`Couldn't load note ${note.midi} (${res.status})`);
-      samples.set(note.midi, await this.ctx.decodeAudioData(await res.arrayBuffer()));
+      const decoded = await this.ctx.decodeAudioData(await res.arrayBuffer());
+      if (note.loop) {
+        const { buffer, start, end } = withLoopCrossfade(this.ctx, decoded, note.loop);
+        samples.set(note.midi, buffer);
+        loops.set(note.midi, { start, end });
+      } else {
+        samples.set(note.midi, decoded);
+      }
       onProgress?.(++done / detail.notes.length);
     }));
     this.samples = samples;
+    this.loops = loops;
     this.roots = [...samples.keys()].sort((a, b) => a - b);
     this.instrument = detail;
   }
@@ -54,6 +65,12 @@ export class Sampler {
     const src = ctx.createBufferSource();
     src.buffer = this.samples.get(root);
     src.playbackRate.value = Math.pow(2, (midi - root) / 12);
+    const loop = this.hold && this.loops.get(root);
+    if (loop) {
+      src.loop = true;
+      src.loopStart = loop.start;
+      src.loopEnd = loop.end;
+    }
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(velocityGain(vel), when);
     src.connect(gain).connect(destination);
@@ -137,6 +154,26 @@ export class Sampler {
     }
     return offline.startRendering();
   }
+}
+
+// A copy of `decoded` whose loop end already crossfades into the audio just before the loop
+// start, so jumping from end back to start is seamless. `loop` is in the file's frames.
+function withLoopCrossfade(ctx, decoded, loop) {
+  const ratio = decoded.sampleRate / loop.rate; // the browser may have resampled the file
+  const start = Math.round(loop.start * ratio);
+  const end = Math.min(decoded.length, Math.round(loop.end * ratio));
+  const fade = Math.min(Math.round(loop.crossfade * ratio), start, end - start);
+  const buffer = ctx.createBuffer(decoded.numberOfChannels, decoded.length, decoded.sampleRate);
+  for (let c = 0; c < decoded.numberOfChannels; c++) {
+    const src = decoded.getChannelData(c);
+    const out = buffer.getChannelData(c);
+    out.set(src);
+    for (let i = 0; i < fade; i++) {
+      const r = (i + 1) / fade; // 0 -> 1 across the last `fade` frames before the loop end
+      out[end - fade + i] = src[end - fade + i] * (1 - r) + src[start - fade + i] * r;
+    }
+  }
+  return { buffer, start: start / decoded.sampleRate, end: end / decoded.sampleRate };
 }
 
 export function takeLength(notes, release = 0.6) {

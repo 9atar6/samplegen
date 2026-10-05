@@ -237,6 +237,10 @@ kbd {
 main { position: relative; z-index: 1; flex: 1; min-height: 0; }
 .view { height: 100%; padding: 0 18px 18px; animation: view-in 0.45s var(--ease) both; }
 @keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
+.ghost.toggle.active { color: var(--sig); border-color: var(--sig); box-shadow: 0 0 0 1px var(--sig) inset; }
+.lib-banner { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px; background: var(--well); font-size: 13.5px; }
+.lib-banner .ghost { margin-left: auto; }
+.lib-index { margin: 0; }
 #view-play { display: grid; grid-template-columns: 412px minmax(0, 1fr); gap: 16px; min-height: 0; }
 .play-screen { display: flex; flex-direction: column; gap: 14px; padding: 16px; min-height: 0; }
 .play-screen.over { outline: 2px dashed var(--sig); outline-offset: -6px; }

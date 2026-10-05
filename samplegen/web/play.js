@@ -366,6 +366,7 @@ export function initPlay() {
     sampler.release = Number(e.target.value);
     $("#play-release-out").textContent = `${Number(e.target.value).toFixed(2)} s`;
   });
+  $("#play-hold").addEventListener("change", (e) => { sampler.hold = e.target.checked; });
   $("#take-record").addEventListener("click", toggleRecord);
   $("#take-play").addEventListener("click", togglePlay);
   $("#take-clear").addEventListener("click", () => { stopPlayback(); setTake([]); });

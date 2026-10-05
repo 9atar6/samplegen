@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 
+from .instruments import ensure_loops
 from .library import NewSample, SampleNotFound
 from .midi import MidiError
 from .play import instrument_info, list_instruments
@@ -49,7 +50,9 @@ def add_play_routes(app: FastAPI, ctx) -> None:
     @app.get("/api/instruments/{instrument_id}")
     def instrument(instrument_id: str):
         info = instrument_or_404(instrument_id)
-        notes = [{"midi": m, "url": f"/api/instruments/{instrument_id}/notes/{m}"} for m in sorted(info.notes)]
+        loops = ensure_loops(info.folder, info.notes)  # first open of an older instrument: computed now
+        notes = [{"midi": m, "url": f"/api/instruments/{instrument_id}/notes/{m}", "loop": loops.get(m)}
+                 for m in sorted(info.notes)]
         return {**info.to_dict(), "notes": notes}
 
     @app.get("/api/instruments/{instrument_id}/notes/{midi}")

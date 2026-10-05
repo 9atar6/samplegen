@@ -48,6 +48,15 @@ On any sample: **Split into stems** (`S`, Demucs htdemucs_ft), **rename / tags**
 
 - **Seamless loop** (SFX / Free): ambiences, drones and beds whose end flows back into their start — the model plays
   on past the end and that continuation is crossfaded (2 s, equal-power) into the beginning. Up to ~6 min with Medium.
+- **Play** tab: play your generated instruments from a **MIDI keyboard** (Chrome/Edge, velocity + sustain pedal),
+  the computer keys (`A`–`K`, `Z`/`X` octave) or the screen. Held notes sustain (each note gets a crossfaded sustain
+  loop, also written into the Decent Sampler / SFZ presets). Record takes, **hum a melody** and hear it on the
+  instrument, drop a `.mid` (or a sample's ♪), export MIDI, save takes to the library.
+- **Search by sound** (Library → *by sound*): type what it sounds like ("metallic scrape", "warm pad"), or press
+  `L` on any sample for **sounds like this**. Uses CLAP from style training, or `tools\install-search.bat` alone;
+  samplegen fingerprints your library in the background (CPU, newest first).
+- **Repair**: at start, samples moved by an interrupted operation are re-linked, finished takes that were never
+  saved come back as "Recovered take".
 - **Voice to sound** (Transform / Edit): press **Record your voice**, imitate the sound ("pshhh", "brrrm", "tk-tk"),
   then describe what it should become. The rhythm and envelope of your voice drive the result.
 Library: filter by tag, search, and **Export pack** (copies what's listed into `Packs\<name>\`, optionally
@@ -110,7 +119,7 @@ install.bat          install / repair everything
 samplegen/           the app (Python backend + web UI in samplegen/web)
 engine_nodes/        samplegen's own ComfyUI nodes (float WAV in/out, Stable Audio 3 inpainting)
 trainer/             style-training helpers (LoRA converter, CLAP tagger)
-tools/               install-training.bat (optional), install-midi.bat (part of install), run-tests.bat (developers)
+tools/               install-training.bat, install-search.bat (optional), install-midi.bat (part of install), run-tests.bat
 midi/                MIDI extraction script (its own Python in midi/.venv, created by install)
 tests/               test suite (engine faked, no GPU needed)
 engine/              ComfyUI + models              (created by install.bat, not in git)

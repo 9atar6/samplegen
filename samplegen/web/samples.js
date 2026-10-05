@@ -162,10 +162,11 @@ export function createSampleRow(record, { onChange } = {}) {
   const stemsBtn = iconButton("stems", "Split into stems (S)", "stems");
   const editBtn = iconButton("edit", "Rename / tags (E)", "edit");
   const midiBtn = iconButton("midi", "Extract MIDI notes (M)", "midi");
+  const similarBtn = iconButton("similar", "Find sounds like this one (L)", "similar");
   midiBtn.draggable = true;
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.append(favBtn, keepBtn, trashBtn, editBtn, sourceBtn, stemsBtn, midiBtn, revealBtn);
+  actions.append(favBtn, keepBtn, trashBtn, editBtn, sourceBtn, stemsBtn, midiBtn, similarBtn, revealBtn);
   el.append(playBtn, canvas, info, actions);
 
   const row = { el, record, canvas, duration: null, loading: false };
@@ -210,8 +211,10 @@ export function createSampleRow(record, { onChange } = {}) {
     stems: () => { if (row.record.mode !== "instrument") emit("samplegen:stems"); },
     edit: () => openEditor(row, (updated) => update(Promise.resolve(updated))),
     midi: () => extractMidi(row, midiBtn),
+    similar: () => emit("samplegen:similar"),
   };
   el.sampleActions = actionsApi;
+  similarBtn.addEventListener("click", actionsApi.similar);
   midiBtn.addEventListener("click", actionsApi.midi);
   midiBtn.addEventListener("dragstart", (e) => {
     e.stopPropagation(); // drag the MIDI file, not the row's WAV

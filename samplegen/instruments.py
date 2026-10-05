@@ -12,11 +12,12 @@ Prompt grammar (from the model's keybed_training_strategy.md):
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from xml.sax.saxutils import escape, quoteattr
+from xml.sax.saxutils import quoteattr
 
 import numpy as np
 
 from .audio import ExportFormat, apply_fades, fit_length, write_wav
+from .loops import load_loops, note_loops, save_loops
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 NOTES_PER_CHUNK = 6
@@ -135,11 +136,20 @@ def key_ranges(midis: list[int]) -> dict[int, tuple[int, int]]:
     return ranges
 
 
-def decent_sampler_preset(title: str, files: dict[int, str]) -> str:
+def _ds_loop(loop: dict | None) -> str:
+    if not loop:
+        return ""
+    # Decent Sampler's loopEnd is the last frame inside the loop (inclusive).
+    return (f' loopEnabled="true" loopStart="{loop["start"]}" loopEnd="{loop["end"] - 1}"'
+            f' loopCrossfade="{loop["crossfade"]}" loopCrossfadeMode="linear"')
+
+
+def decent_sampler_preset(title: str, files: dict[int, str], loops: dict[int, dict] | None = None) -> str:
     ranges = key_ranges(list(files))
+    loops = loops or {}
     regions = "\n".join(
         f'      <sample path={quoteattr(path)} rootNote="{midi}" loNote="{ranges[midi][0]}" '
-        f'hiNote="{ranges[midi][1]}" loVel="0" hiVel="127"/>'
+        f'hiNote="{ranges[midi][1]}" loVel="0" hiVel="127"{_ds_loop(loops.get(midi))}/>'
         for midi, path in sorted(files.items())
     )
     knob = ('      <labeled-knob x="{x}" y="40" width="90" label="{label}" type="float" minValue="{lo}" '
@@ -168,13 +178,19 @@ def decent_sampler_preset(title: str, files: dict[int, str]) -> str:
     )
 
 
-def sfz_file(title: str, files: dict[int, str]) -> str:
+def sfz_file(title: str, files: dict[int, str], loops: dict[int, dict] | None = None) -> str:
     ranges = key_ranges(list(files))
-    lines = [f"// {escape(title)} (samplegen / Foundation-1.2 Keybeds)",
+    loops = loops or {}
+    lines = [f"// {title} (samplegen / Foundation-1.2 Keybeds)",
              "<global> ampeg_attack=0.005 ampeg_release=0.6"]
     for midi, path in sorted(files.items()):
         lo, hi = ranges[midi]
-        lines.append(f"<region> sample={path} pitch_keycenter={midi} lokey={lo} hikey={hi}")
+        region = f"<region> sample={path} pitch_keycenter={midi} lokey={lo} hikey={hi}"
+        if loop := loops.get(midi):
+            # loop_crossfade is in seconds (sfizz / ARIA); players without it still loop cleanly enough
+            region += (f" loop_mode=loop_sustain loop_start={loop['start']} loop_end={loop['end'] - 1}"
+                       f" loop_crossfade={loop['crossfade'] / loop['rate']:.4f}")
+        lines.append(region)
     return "\n".join(lines) + "\n"
 
 
@@ -188,6 +204,29 @@ def write_instrument(folder: Path, title: str, file_stem: str, notes: dict[int, 
         rel = f"Samples/{file_stem}_{midi_to_name(midi).replace('#', 's')}.wav"
         write_wav(folder / rel, audio, sample_rate, fmt, title=f"{title} {midi_to_name(midi)}")
         files[midi] = rel
-    (folder / f"{file_stem}.dspreset").write_text(decent_sampler_preset(title, files), encoding="utf-8")
-    (folder / f"{file_stem}.sfz").write_text(sfz_file(title, files), encoding="utf-8")
+    # Loop points come from the written files: they're in the export's sample rate.
+    loops = note_loops({midi: folder / rel for midi, rel in files.items()})
+    save_loops(folder, loops)
+    write_presets(folder, title, file_stem, files, loops)
     return files
+
+
+def write_presets(folder: Path, title: str, file_stem: str, files: dict[int, str], loops: dict[int, dict]) -> None:
+    (folder / f"{file_stem}.dspreset").write_text(decent_sampler_preset(title, files, loops), encoding="utf-8")
+    (folder / f"{file_stem}.sfz").write_text(sfz_file(title, files, loops), encoding="utf-8")
+
+
+def ensure_loops(folder: Path, notes: dict[int, Path]) -> dict[int, dict]:
+    """Loop points for an instrument; computed (and its presets updated) the first time,
+    so instruments made before sustain loops existed get them too."""
+    loops = load_loops(folder)
+    if loops is not None:
+        return loops
+    loops = note_loops(notes)
+    save_loops(folder, loops)
+    presets = sorted(Path(folder).glob("*.dspreset"))
+    if presets:
+        stem = presets[0].stem
+        files = {midi: path.relative_to(folder).as_posix() for midi, path in notes.items()}
+        write_presets(folder, Path(folder).name, stem, files, loops)
+    return loops

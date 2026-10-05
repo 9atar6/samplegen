@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from .api_extras import add_extra_routes, open_in_explorer
 from .api_play import add_play_routes
+from .api_search import add_search_routes
 from .api_training import add_training_routes
 from .audio import ExportFormat
 from .autodescribe import Describer
@@ -23,6 +24,7 @@ from .generation_request import GenerationRequest
 from .jobs import JobManager
 from .library import FileInUse, Library, SampleNotFound
 from .midi import Transcriber
+from .search import ClapWorker, SoundIndex
 from .setup_check import FIX as SETUP_FIX
 from .setup_check import missing_parts
 from .sources import MAX_UPLOAD_BYTES, SourceNotFound, SourceStore
@@ -83,9 +85,13 @@ class AppContext:
     training: TrainingManager | None = None
     describer: Describer | None = None
     midi: Transcriber | None = None
+    search: SoundIndex | None = None
 
     def __post_init__(self):
         root = self.library.root
+        if self.search is None:  # no CLAP: status says so, searches explain how to install it
+            self.search = SoundIndex(self.library, ClapWorker([root / "_no_clap" / "python.exe"],
+                                                             root / "_no_clap" / "clap_server.py", root / "clap.log"))
         if self.midi is None:  # not installed: routes answer with how to install it
             self.midi = Transcriber(root / "_no_midi" / "python.exe", root / "_no_midi" / "transcribe.py")
         if self.sources is None:
@@ -236,6 +242,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     add_extra_routes(app, ctx)
     add_training_routes(app, ctx)
     add_play_routes(app, ctx)
+    add_search_routes(app, ctx)
 
     # ---------- sources (Transform / Edit) ----------
 

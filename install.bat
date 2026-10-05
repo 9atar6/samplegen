@@ -137,6 +137,7 @@ echo       the web pages you need and tells you exactly what to click.
 choice /c YN /m "      Set it up now"
 if errorlevel 2 (
   echo       Skipped. To add it later, double-click tools\install-training.bat
+  call :offer_search
 ) else (
   call "%ROOT%tools\install-training.bat" nopause || goto :fail
 )
@@ -207,6 +208,18 @@ echo       WARNING: less than 8 GB of video memory. Short sounds may work; long 
 echo       instruments will probably run out of memory.
 echo       Press any key to continue anyway, or close this window to stop.
 pause >nul
+exit /b 0
+
+:offer_search
+echo.
+echo       Search by sound (optional, about 1.5 GB): find sounds in your library by what they
+echo       sound like - "metallic scrape", or "more like this one". Style training includes it.
+choice /c YN /m "      Set up search by sound now"
+if errorlevel 2 (
+  echo       Skipped. To add it later, double-click tools\install-search.bat
+  exit /b 0
+)
+call "%ROOT%tools\install-search.bat" nopause
 exit /b 0
 
 :shortcut

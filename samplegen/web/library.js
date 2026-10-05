@@ -6,8 +6,9 @@ import { createSampleRow, removeRow } from "./samples.js";
 
 const $ = (sel) => document.querySelector(sel);
 const LIST_LIMIT = 2000;
-const state = { filter: "new", shown: [] };
+const state = { filter: "new", shown: [], bySound: false, similar: null };
 let searchTimer = null;
+let indexTimer = null;
 
 async function refreshTags() {
   const select = $("#lib-tag");
@@ -32,8 +33,17 @@ export async function loadLibrary() {
   params.limit = LIST_LIMIT;
   const list = $("#lib-list");
   let records;
+  const soundQuery = state.bySound && q;
+  $("#lib-similar").hidden = !state.similar;
   try {
-    records = await api.samples(params);
+    if (state.similar) {
+      records = await api.similar(state.similar.id);
+      $("#lib-similar-label").textContent = `Sounds most like “${state.similar.name}”`;
+    } else if (soundQuery) {
+      records = await api.searchSound(q); // ranked by how much they sound like the words
+    } else {
+      records = await api.samples(params);
+    }
   } catch (err) {
     if (ticket !== latestLoad) return;
     $("#lib-empty").textContent = err.message;
@@ -42,8 +52,10 @@ export async function loadLibrary() {
   }
   if (ticket !== latestLoad) return; // a newer search/filter is on its way
   for (const el of list.querySelectorAll(".sample")) removeRow(el.dataset.id, list);
-  const matches = (r) => (filter === "favorites" ? r.favorite && r.status !== "trashed" : r.status === filter)
-    && (!tag || (r.tags || []).includes(tag));
+  const ranked = Boolean(state.similar || soundQuery); // ranked results span the whole library (but trash)
+  const matches = (r) => (ranked ? r.status !== "trashed"
+    : (filter === "favorites" ? r.favorite && r.status !== "trashed" : r.status === filter)
+      && (!tag || (r.tags || []).includes(tag)));
   state.shown = records.map((r) => r.id);
   list.replaceChildren(...records.map((r) => createSampleRow(r, {
     onChange: (updated) => {
@@ -113,14 +125,58 @@ export function initLibrary() {
     });
   }
   $("#lib-search").addEventListener("input", () => {
+    state.similar = null; // typing starts a new search
     clearTimeout(searchTimer);
     searchTimer = setTimeout(loadLibrary, 250);
   });
   $("#lib-tag").addEventListener("change", loadLibrary);
+  $("#lib-by-sound").addEventListener("click", () => setBySound(!state.bySound));
+  $("#lib-similar-clear").addEventListener("click", () => { state.similar = null; loadLibrary(); });
   bindPackDialog();
+}
+
+function setBySound(on) {
+  state.bySound = on;
+  const button = $("#lib-by-sound");
+  button.classList.toggle("active", on);
+  button.setAttribute("aria-pressed", String(on));
+  $("#lib-search").placeholder = on ? "Describe how it sounds: metallic scrape, warm pad, distant thunder…" : "Search names, prompts, tags…";
+  pollIndex();
+  if ($("#lib-search").value.trim()) loadLibrary();
+}
+
+// "Listening to your library… 120 / 800" while the fingerprints are being made.
+async function pollIndex() {
+  clearTimeout(indexTimer);
+  const hint = $("#lib-index-status");
+  if (!(state.bySound || state.similar) || $("#view-library").hidden) {
+    hint.hidden = true;
+    return;
+  }
+  try {
+    const s = await api.searchStatus();
+    hint.hidden = false;
+    if (!s.available) {
+      hint.textContent = "Search by sound needs the CLAP model: double-click tools\\install-search.bat (or install style training), then restart samplegen.";
+      return;
+    }
+    if (s.error) hint.textContent = `Search by sound is paused: ${s.error}`;
+    else if (s.indexed < s.total) hint.textContent = `Listening to your library… ${s.indexed} / ${s.total} sounds (newest first). Results get better as it goes.`;
+    else { hint.hidden = true; return; }
+  } catch {
+    hint.hidden = true;
+  }
+  indexTimer = setTimeout(pollIndex, 4000);
+}
+
+// "Sounds like this" on any sample row: the next Library load lists its closest matches.
+export function setSimilar(record) {
+  state.similar = { id: record.id, name: record.name };
+  $("#lib-search").value = "";
 }
 
 export function showLibrary() {
   refreshTags();
+  pollIndex();
   return loadLibrary();
 }

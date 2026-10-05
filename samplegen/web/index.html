@@ -239,6 +239,7 @@
               <li><kbd>S</kbd>stems</li>
               <li><kbd>E</kbd>rename · tags</li>
               <li><kbd>M</kbd>MIDI</li>
+              <li><kbd>L</kbd>sounds like</li>
             </ul>
           </div>
         </div>
@@ -255,9 +256,15 @@
           <button type="button" data-filter="trashed">Trash</button>
         </div>
         <label class="search"><span data-icon="search"></span><input type="search" id="lib-search" placeholder="Search names, prompts, tags…" maxlength="200"></label>
+        <button type="button" class="ghost toggle" id="lib-by-sound" aria-pressed="false" title="Search by what things sound like (CLAP), not by their names"><span data-icon="wave"></span>by sound</button>
         <select id="lib-tag" title="Filter by tag"><option value="">All tags</option></select>
         <button type="button" class="ghost" id="pack-open" title="Export the samples shown below as a sample pack folder"><span data-icon="download"></span>Export pack</button>
       </div>
+      <div class="lib-banner" id="lib-similar" hidden>
+        <span data-icon="similar"></span><span id="lib-similar-label"></span>
+        <button type="button" class="ghost" id="lib-similar-clear"><span data-icon="x"></span>Back to the list</button>
+      </div>
+      <p class="hint lib-index" id="lib-index-status" hidden></p>
       <form class="pack-dialog" id="pack-dialog" hidden>
         <div class="pack-title"><span data-icon="download"></span><b>Export as a sample pack</b><small>copies what's listed below · the library stays untouched</small></div>
         <label class="field"><span>Pack name</span><input id="pack-name" maxlength="80" required placeholder="Dark Impacts Vol. 1"></label>
@@ -388,6 +395,7 @@
             <p class="hint">Computer keys: <kbd>A</kbd>–<kbd>K</kbd> play (<kbd>W</kbd> <kbd>E</kbd> <kbd>T</kbd> <kbd>Y</kbd> <kbd>U</kbd> sharps), <kbd>Z</kbd>/<kbd>X</kbd> octave · <span id="play-octave">C4</span></p>
             <label class="field"><span>Volume <output id="play-volume-out">80%</output></span><input type="range" id="play-volume" min="0" max="1" step="0.01" value="0.8"></label>
             <label class="field"><span>Release <output id="play-release-out">0.6 s</output></span><input type="range" id="play-release" min="0.05" max="4" step="0.05" value="0.6"></label>
+            <label class="check" title="Held keys keep sounding by looping part of each note (off: notes play once, ~3 s)"><input type="checkbox" id="play-hold" checked><span>Hold notes as long as keys are down</span></label>
           </section>
           <section class="deck-section">
             <h2 class="deck-label"><span>03</span>Take</h2>
