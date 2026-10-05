@@ -39,6 +39,8 @@ class PackIn(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
     sample_ids: list[str] = Field(..., min_length=1, max_length=MAX_PACK_SAMPLES)
     export: ExportFormatIn | None = None  # None: copy files as they are
+    loudness: float | None = None  # LUFS target, None: keep levels
+    round_robin: bool = False
     reveal: bool = True
 
 
@@ -126,7 +128,8 @@ def add_extra_routes(app: FastAPI, ctx) -> None:
         records = [sample_or_404(sid) for sid in dict.fromkeys(body.sample_ids)]
         fmt = body.export.to_format() if body.export else None
         try:
-            result = export_pack(ctx.library, records, body.name, fmt)
+            result = export_pack(ctx.library, records, body.name, fmt, loudness=body.loudness,
+                                 round_robin=body.round_robin)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         except OSError as exc:  # disk full, drive unplugged, same pack exported twice at once...

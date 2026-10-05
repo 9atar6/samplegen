@@ -98,6 +98,8 @@ function bindPackDialog() {
       name: $("#pack-name").value,
       sample_ids: state.shown,
       export: format ? { sample_rate: Number(rate), bit_depth: bits } : null,
+      loudness: $("#pack-loudness").value ? Number($("#pack-loudness").value) : null,
+      round_robin: $("#pack-rr").checked,
       reveal: true,
     };
     $("#pack-export").disabled = true;

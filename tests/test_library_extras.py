@@ -114,6 +114,12 @@ def test_pack_csv_never_holds_spreadsheet_formulas(lib, tmp_path):
     assert row["prompt"].startswith("'=")
 
 
+def test_csv_guard_leaves_numbers_alone():
+    from samplegen.packs import _csv_safe
+    assert _csv_safe("-18.0") == "-18.0"
+    assert _csv_safe("-cmd|' /C calc'!A0") == "'-cmd|' /C calc'!A0"
+
+
 def test_reserved_windows_names_are_not_used_as_folders():
     assert clean_pack_name("CON") == "_CON"
     assert clean_pack_name("nul.txt") == "_nul.txt"

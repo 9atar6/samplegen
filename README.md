@@ -52,6 +52,13 @@ On any sample: **Split into stems** (`S`, Demucs htdemucs_ft), **rename / tags**
   the computer keys (`A`–`K`, `Z`/`X` octave) or the screen. Held notes sustain (each note gets a crossfaded sustain
   loop, also written into the Decent Sampler / SFZ presets). Record takes, **hum a melody** and hear it on the
   instrument, drop a `.mid` (or a sample's ♪), export MIDI, save takes to the library.
+- **Make it a loop** (Play): **Melody → new sound** snaps a take to the beat, fits it to 4/8 bars at a Foundation-1
+  tempo, renders it as a seamless loop and opens Transform with it (Foundation-1, loop kept seamless): describe a
+  sound and the AI plays your melody with it. **Loops in this key & tempo** detects the take's key
+  (Krumhansl-Kessler) and opens Loop mode set to it.
+- **Pack export** options: match **loudness** (−14 / −18 / −23 LUFS, ITU-R BS.1770, never past −1 dBFS peak) and name
+  takes of one generation as **round robins** (`name_01`, `name_02`… for Wwise / FMOD / samplers); `samples.csv`
+  gets a `lufs` column.
 - **Search by sound** (Library → *by sound*): type what it sounds like ("metallic scrape", "warm pad"), or press
   `L` on any sample for **sounds like this**. Uses CLAP from style training, or `tools\install-search.bat` alone;
   samplegen fingerprints your library in the background (CPU, newest first).

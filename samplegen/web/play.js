@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { bindComputerKeys, buildPiano, connectMidi, midiSupported } from "./keyboard.js";
 import { parseMidi, writeMidi } from "./midifile.js";
 import { Sampler, takeLength } from "./sampler.js";
+import { detectKey, foldIntoLoop, loopBars, loopSeconds, nearestLoopBpm, quantize } from "./theory.js";
 import { toast } from "./toast.js";
 import { startRecording } from "./voice.js";
 
@@ -301,6 +302,58 @@ function encodeWavFloat(buffer) {
   return new Blob([view.buffer], { type: "audio/wav" });
 }
 
+// ---------- make it a loop ----------
+
+// The take at a Foundation-1 tempo: stretched from the tempo it was played at, snapped to
+// sixteenths, cut to 4 or 8 bars. Returns { notes, bpm, bars, key, scale }.
+function takeAsLoop() {
+  const playedBpm = Number($("#take-bpm").value) || 120;
+  const bpm = nearestLoopBpm(playedBpm);
+  const stretch = playedBpm / bpm;
+  const notes = quantize(state.take.map((n) => ({ ...n, time: n.time * stretch, dur: n.dur * stretch })), bpm);
+  const bars = loopBars(notes, bpm);
+  const length = loopSeconds(bpm, bars);
+  const fitted = notes.filter((n) => n.time < length - 1e-6).map((n) => ({ ...n, dur: Math.min(n.dur, length - n.time) }));
+  return { notes: fitted, bpm, bars, ...detectKey(fitted) };
+}
+
+function loopSettings() {
+  if (!state.take.length) {
+    toast("Record, hum or load a take first.", "info");
+    return null;
+  }
+  const loop = takeAsLoop();
+  $("#take-key").textContent = `Sounds like ${loop.key} ${loop.scale} · ${loop.bpm} BPM · ${loop.bars} bars`;
+  return loop;
+}
+
+function toLoops() {
+  const loop = loopSettings();
+  if (!loop) return;
+  document.dispatchEvent(new CustomEvent("samplegen:loop-settings", { detail: loop }));
+}
+
+async function toNewSound() {
+  const loop = loopSettings();
+  if (!loop) return;
+  if (!sampler.ready) return toast("Pick an instrument first: it plays your melody for the AI to hear.", "info");
+  const button = $("#take-to-sound");
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const rendered = await sampler.render(loop.notes);
+    const frames = Math.round(loopSeconds(loop.bpm, loop.bars) * rendered.sampleRate);
+    const wav = encodeWavFloat(foldIntoLoop(rendered, frames, ctx));
+    const name = `${takeName()} ${loop.key}${loop.scale === "minor" ? "m" : ""} ${loop.bpm}`;
+    const source = await api.uploadSource(new File([wav], `${name}.wav`, { type: "audio/wav" }));
+    document.dispatchEvent(new CustomEvent("samplegen:melody-source", { detail: { ...loop, source } }));
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // ---------- piano roll ----------
 
 function drawRoll(playhead = null) {
@@ -379,6 +432,8 @@ export function initPlay() {
   });
   $("#take-save-midi").addEventListener("click", saveMidiFile);
   $("#take-save").addEventListener("click", saveToLibrary);
+  $("#take-to-sound").addEventListener("click", toNewSound);
+  $("#take-to-loops").addEventListener("click", toLoops);
   bindDrop();
   window.addEventListener("resize", () => { if (visible()) drawRoll(); });
   buildKeys(...DEFAULT_RANGE);

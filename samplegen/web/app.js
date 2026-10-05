@@ -410,6 +410,40 @@ async function useSampleAsSource(record) {
   }
 }
 
+// From the Play tab: Loop mode in the key and tempo of a take.
+function applyLoopSettings({ key, scale, bpm, bars }) {
+  showView("generate");
+  setMode("loop");
+  $("#bpm").value = String(bpm);
+  $("#bars").value = String(bars);
+  $("#key").value = key;
+  setScale(scale);
+  updateOutputs();
+  saveForm();
+  $("#prompt").focus();
+  toast(`Loop mode set to ${key} ${scale}, ${bpm} BPM, ${bars} bars. Pick instruments and Generate.`, "ok");
+}
+
+// From the Play tab: the take's melody as a loop source; describe the sound it should become.
+function applyMelodySource({ source, key, scale, bpm, bars }) {
+  showView("generate");
+  setMode("transform", "f1-samples"); // Foundation-1 keeps notes, tempo and key
+  $("#bpm").value = String(bpm);
+  $("#bars").value = String(bars);
+  $("#key").value = key;
+  setScale(scale);
+  sourcePanel.setSource(source);
+  $("#source-loop").checked = true;
+  $("#strength").value = "0.55"; // enough to change the sound, gentle enough to keep the notes
+  $("#strength").dispatchEvent(new Event("input", { bubbles: true }));
+  $("#prompt").value = "";
+  $("#prompt").placeholder = "The sound for your melody: Supersaw Lead, Warm, Wide · Plucked Marimba · Gritty Reese Bass…";
+  updateOutputs();
+  saveForm();
+  $("#prompt").focus();
+  toast(`Your melody (${key} ${scale}, ${bpm} BPM) is the source. Describe the sound and Generate; raise Strength for wilder results.`, "ok");
+}
+
 async function splitStems(record) {
   if (splitting.has(record.id)) return;
   splitting.add(record.id);
@@ -538,6 +572,8 @@ async function init() {
   document.addEventListener("samplegen:use-source", (e) => useSampleAsSource(e.detail));
   document.addEventListener("samplegen:stems", (e) => splitStems(e.detail));
   document.addEventListener("samplegen:similar", (e) => { setSimilar(e.detail); showView("library"); });
+  document.addEventListener("samplegen:loop-settings", (e) => applyLoopSettings(e.detail));
+  document.addEventListener("samplegen:melody-source", (e) => applyMelodySource(e.detail));
   document.addEventListener("samplegen:styles", (e) => {
     setStyles(e.detail, state.savedStyle);
     state.savedStyle = undefined;

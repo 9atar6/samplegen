@@ -11,14 +11,18 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from .audio import ExportFormat, read_wav, write_wav
+import soundfile as sf
+
+from .audio import SUPPORTED_RATES, ExportFormat, read_wav, write_wav
 from .library import KEPT_FOLDERS, Library, SampleRecord, slugify
+from .loudness import match_loudness
 
 PACKS_DIR = "Packs"
 MAX_PACK_SAMPLES = 2000
 MAX_PACK_NAME = 80
+MIN_LUFS, MAX_LUFS = -36.0, -6.0
 INVALID_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-CSV_FIELDS = ("file", "name", "type", "model", "prompt", "seed", "bpm", "bars", "key", "tags", "duration_s")
+CSV_FIELDS = ("file", "name", "type", "model", "prompt", "seed", "bpm", "bars", "key", "tags", "duration_s", "lufs")
 
 
 @dataclass(frozen=True)
@@ -45,9 +49,13 @@ def clean_pack_name(name: str) -> str:
     return cleaned
 
 
+NUMBER = re.compile(r"[-+]?\d+(\.\d+)?")
+
+
 def _csv_safe(value):
-    """Spreadsheets run cells starting with = + - @ as formulas: a prompt must stay text."""
-    if isinstance(value, str) and value.startswith(FORMULA_START):
+    """Spreadsheets run cells starting with = + - @ as formulas: a prompt must stay text.
+    Plain numbers (a loudness of -18.0) are safe and stay numbers."""
+    if isinstance(value, str) and value.startswith(FORMULA_START) and not NUMBER.fullmatch(value):
         return "'" + value
     return value
 
@@ -69,16 +77,48 @@ def _free_file(folder: Path, stem: str) -> Path:
     return path
 
 
+SUBTYPE_DEPTHS = {"FLOAT": "32f", "DOUBLE": "32f", "PCM_24": "24", "PCM_16": "16"}
+
+
+def round_robin_stems(records: list[SampleRecord]) -> dict[str, str]:
+    """id -> file stem. Takes of the same generation become <name>_01, <name>_02... (the
+    convention game audio middleware and samplers use for round robins)."""
+    groups: dict[tuple[str, str], list[SampleRecord]] = {}
+    for record in records:
+        groups.setdefault((record.batch_id, record.name), []).append(record)
+    stems = {}
+    for (_, name), members in groups.items():
+        base = slugify(name) or "sample"
+        if len(members) == 1:
+            stems[members[0].id] = base
+            continue
+        members.sort(key=lambda r: (r.params.get("variation") or 0, r.created_at, r.id))
+        for i, record in enumerate(members, start=1):
+            stems[record.id] = f"{base}_{i:02d}"
+    return stems
+
+
+def _source_format(path: Path) -> ExportFormat:
+    info = sf.info(str(path))
+    rate = info.samplerate if info.samplerate in SUPPORTED_RATES else 44100
+    return ExportFormat(rate, SUBTYPE_DEPTHS.get(info.subtype, "24"))
+
+
 def export_pack(library: Library, records: list[SampleRecord], name: str,
-                fmt: ExportFormat | None = None) -> PackResult:
-    """Copy `records` into a new pack folder; `fmt` converts, None keeps files as they are."""
+                fmt: ExportFormat | None = None, loudness: float | None = None,
+                round_robin: bool = False) -> PackResult:
+    """Copy `records` into a new pack folder; `fmt` converts, None keeps files as they are.
+    `loudness` (LUFS) matches every file's level; `round_robin` names takes _01, _02..."""
     if not records:
         raise ValueError("There are no samples to export.")
     if len(records) > MAX_PACK_SAMPLES:
         raise ValueError(f"Packs are limited to {MAX_PACK_SAMPLES} samples.")
+    if loudness is not None and not MIN_LUFS <= loudness <= MAX_LUFS:
+        raise ValueError(f"Loudness must be between {MIN_LUFS} and {MAX_LUFS} LUFS.")
     pack_name = clean_pack_name(name)
     folder = free_folder(library.root / PACKS_DIR, pack_name)
     folder.mkdir(parents=True)
+    stems = round_robin_stems(records) if round_robin else {}
 
     rows, missing = [], 0
     for record in records:
@@ -88,15 +128,19 @@ def export_pack(library: Library, records: list[SampleRecord], name: str,
             continue
         subfolder = folder / KEPT_FOLDERS.get(record.mode, "Other")
         subfolder.mkdir(exist_ok=True)
-        dest = _free_file(subfolder, slugify(record.name) or "sample")
+        dest = _free_file(subfolder, stems.get(record.id) or slugify(record.name) or "sample")
         midi = source.with_suffix(".mid")
         if midi.exists():
             shutil.copy2(midi, dest.with_suffix(".mid"))  # loops travel with their notes
-        if fmt is None:
+        lufs = None
+        if fmt is None and loudness is None:
             shutil.copy2(source, dest)
         else:
             audio, sr = read_wav(source)
-            write_wav(dest, audio, sr, fmt, title=record.name, comment=f"samplegen | {record.prompt}"[:1000],
+            if loudness is not None:
+                audio, lufs = match_loudness(audio, sr, loudness)
+            write_wav(dest, audio, sr, fmt or _source_format(source), title=record.name,
+                      comment=f"samplegen | {record.prompt}"[:1000],
                       loop=record.mode == "loop" or bool(record.params.get("loop")))
         p = record.params
         rows.append({
@@ -104,6 +148,7 @@ def export_pack(library: Library, records: list[SampleRecord], name: str,
             "model": record.model, "prompt": record.prompt, "seed": record.seed,
             "bpm": p.get("bpm") or "", "bars": p.get("bars") or "", "key": p.get("key") or "",
             "tags": " ".join(record.tags), "duration_s": f"{record.duration:.3f}",
+            "lufs": f"{lufs:.1f}" if lufs is not None else "",
         })
 
     # utf-8-sig: Excel only reads accents correctly when the file starts with a BOM.

@@ -277,6 +277,15 @@
             <option value="44100:32f">WAV 32-bit float · 44.1 kHz</option>
           </select>
         </label>
+        <label class="field"><span>Loudness <em>match every file</em></span>
+          <select id="pack-loudness" title="Integrated loudness (ITU-R BS.1770). Punchy one-shots stop at -1 dBFS peak rather than clip.">
+            <option value="">Keep levels as they are</option>
+            <option value="-14">−14 LUFS · loud (streaming, trailers)</option>
+            <option value="-18">−18 LUFS · balanced (game SFX)</option>
+            <option value="-23">−23 LUFS · broadcast (EBU R128)</option>
+          </select>
+        </label>
+        <label class="check" title="Takes of the same generation are named name_01, name_02… (Wwise, FMOD and samplers pick these up as round robins)"><input type="checkbox" id="pack-rr"><span>Name variations as round robins <em>_01, _02…</em></span></label>
         <div class="pack-actions">
           <button type="button" class="ghost" id="pack-cancel">Cancel</button>
           <button type="submit" class="primary small" id="pack-export">Export <span id="pack-count"></span></button>
@@ -417,6 +426,13 @@
               <button type="button" class="ghost" id="take-save-midi"><span data-icon="download"></span><span>.mid</span></button>
               <button type="button" class="primary small" id="take-save"><span data-icon="check"></span><span>Save to library</span></button>
             </div>
+          </section>
+          <section class="deck-section">
+            <h2 class="deck-label"><span>04</span>Make it a loop</h2>
+            <p class="hint">Set <b>Tempo</b> above to the tempo you played at. The take is snapped to the beat and fitted to 4 or 8 bars.</p>
+            <button type="button" class="ghost" id="take-to-sound" title="Your melody as a seamless loop, as the source of a Transform: describe the sound, the AI plays your notes with it"><span data-icon="shuffle"></span><span>Melody → new sound</span></button>
+            <button type="button" class="ghost" id="take-to-loops" title="Open Loop mode in the key and tempo of this take"><span data-icon="loop"></span><span>Loops in this key &amp; tempo</span></button>
+            <p class="hint" id="take-key"></p>
           </section>
         </div>
       </div>
