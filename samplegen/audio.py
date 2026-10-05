@@ -37,6 +37,7 @@ class PostOptions:
     fade_in_ms: float = 0.0
     fade_out_ms: float = 0.0
     loop_crossfade_ms: float = 10.0
+    equal_power_loop: bool = False
 
 
 def db_to_gain(db: float) -> float:
@@ -152,8 +153,14 @@ def apply_fades(audio: np.ndarray, sample_rate: int, fade_in_ms: float = 0.0,
     return out
 
 
+def _equal_power_ramp(length: int) -> np.ndarray:
+    """sin ramp: with its mirror (cos) the summed *power* stays constant, which is what
+    uncorrelated material (rain, room tone, textures) needs to not dip mid-crossfade."""
+    return np.sin(np.linspace(0.0, np.pi / 2, length))[:, None]
+
+
 def make_seamless_loop(raw: np.ndarray, loop_frames: int, sample_rate: int,
-                       crossfade_ms: float = 10.0) -> np.ndarray:
+                       crossfade_ms: float = 10.0, equal_power: bool = False) -> np.ndarray:
     """Exact-length loop whose end flows into its start.
 
     The model keeps playing past the loop point, so the audio right after
@@ -167,9 +174,14 @@ def make_seamless_loop(raw: np.ndarray, loop_frames: int, sample_rate: int,
         return loop
     if len(raw) < loop_frames + fade:  # both ends to zero, or the wrap would click
         return apply_fades(loop, sample_rate, fade_in_ms=crossfade_ms, fade_out_ms=crossfade_ms)
-    ramp = _ramp(fade)
     continuation = raw[loop_frames:loop_frames + fade]
-    loop[:fade] = loop[:fade] * ramp + continuation * (1.0 - ramp)
+    if equal_power:
+        fade_in = _equal_power_ramp(fade)
+        fade_out = fade_in[::-1]  # cos
+    else:
+        fade_in = _ramp(fade)
+        fade_out = 1.0 - fade_in
+    loop[:fade] = loop[:fade] * fade_in + continuation * fade_out
     return loop
 
 
@@ -215,7 +227,8 @@ def splice_regions(original: np.ndarray, generated: np.ndarray, regions: list[tu
 def postprocess(raw: np.ndarray, sample_rate: int, options: PostOptions) -> np.ndarray:
     audio = remove_dc(raw)
     if options.is_loop:
-        audio = make_seamless_loop(audio, options.target_samples, sample_rate, options.loop_crossfade_ms)
+        audio = make_seamless_loop(audio, options.target_samples, sample_rate, options.loop_crossfade_ms,
+                                   equal_power=options.equal_power_loop)
     else:
         audio = fit_length(audio, options.target_samples)
         if options.trim_silence:

@@ -5,11 +5,13 @@ import sys
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .audio import ExportFormat
 from .instruments import InstrumentRequest
 from .library import SampleNotFound
+from .midi import MidiError
 from .packs import MAX_PACK_SAMPLES, export_pack
 from .stems import StemRequest
 
@@ -71,6 +73,31 @@ def add_extra_routes(app: FastAPI, ctx) -> None:
             return ctx.jobs.submit(request).to_dict()
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    # ---------- MIDI ----------
+
+    @app.post("/api/samples/{sample_id}/midi")
+    def make_midi(sample_id: str):
+        """Transcribe the sample's notes into a .mid next to its WAV (tempo-matched for loops)."""
+        record = sample_or_404(sample_id)
+        if not ctx.library.path_of(record).exists():
+            raise HTTPException(410, "The file was moved or deleted outside samplegen")
+        out = ctx.library.midi_path(record)
+        try:
+            notes = ctx.midi.transcribe(ctx.library.path_of(record), out, bpm=record.params.get("bpm"))
+        except MidiError as exc:
+            raise HTTPException(409 if not ctx.midi.available else 500, str(exc)) from exc
+        if notes == 0:
+            out.unlink(missing_ok=True)
+            raise HTTPException(422, "No notes found: MIDI works on pitched sounds (melodies, chords, bass).")
+        return {"notes": notes, "url": f"/api/samples/{sample_id}/midi", "filename": out.name}
+
+    @app.get("/api/samples/{sample_id}/midi")
+    def get_midi(sample_id: str):
+        path = ctx.library.midi_path(sample_or_404(sample_id))
+        if not path.exists():
+            raise HTTPException(404, "No MIDI for this sample yet")
+        return FileResponse(path, media_type="audio/midi", filename=path.name)
 
     # ---------- library extras ----------
 

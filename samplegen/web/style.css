@@ -585,6 +585,14 @@ input[type="range"]::-moz-range-thumb { width: 14px; height: 24px; border-radius
 .source-head .name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .source-head .meta { font: 400 10.5px/1.4 var(--mono); color: var(--ink-3); }
 .source-wave { display: block; width: 100%; height: 76px; touch-action: none; }
+.sample .icon.midi.busy { animation: blink 0.6s infinite alternate; color: var(--sig-2); }
+.sample .icon.midi.ready { color: var(--sig); cursor: grab; }
+.voice-row { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.record-btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; width: 100%; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 25%, transparent); }
+.record-btn.recording { border-color: var(--danger); color: var(--danger); }
+.record-btn.recording .rec-dot { animation: rec-pulse 1s ease-in-out infinite; }
+@keyframes rec-pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--danger) 0%, transparent); transform: scale(0.85); } }
 .train-clip.excluded { opacity: 0.45; }
 .source-wave.selectable { cursor: crosshair; }
 

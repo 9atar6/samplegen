@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -176,6 +177,24 @@ def explain_failure(log_path: Path) -> str | None:
     return None
 
 
+HEAVY_FOLDERS = ("data", "out")  # copied sounds and checkpoints: GBs, useless once a run has ended
+
+
+def remove_heavy_files(run_dir: Path) -> int:
+    """Delete a finished run's dataset copy and checkpoints, keep train.log. Returns folders removed.
+
+    Only ever touches the two folders samplegen itself created inside a _training run;
+    the user's original sounds are never in there (they're copied in at the start).
+    """
+    removed = 0
+    for name in HEAVY_FOLDERS:
+        folder = Path(run_dir) / name
+        if folder.is_dir() and not folder.is_symlink():
+            shutil.rmtree(folder, ignore_errors=True)
+            removed += 1
+    return removed
+
+
 class TrainingManager:
     def __init__(self, project_dir: Path, library_root: Path, engine_dir: Path, styles: StyleStore,
                  free_engine: Callable[[], None] | None = None):
@@ -285,6 +304,13 @@ class TrainingManager:
             self._set(state="error", error=str(exc), finished=time.time(), log_tail=tail(log_path))
         finally:
             self._process = None
+            remove_heavy_files(work)  # the style (if any) is already saved next to the engine's models
+
+    def clean_old_runs(self) -> int:
+        """Free the space used by finished trainings (dataset copies, checkpoints); keeps their logs."""
+        if self.status()["active"] or not self.work_root.is_dir():
+            return 0
+        return sum(remove_heavy_files(run) for run in self.work_root.iterdir() if run.is_dir())
 
     def _prepare_dataset(self, clips: list[Clip], description: str, data_dir: Path) -> int:
         data_dir.mkdir(parents=True, exist_ok=True)

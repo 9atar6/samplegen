@@ -89,6 +89,9 @@ def export_pack(library: Library, records: list[SampleRecord], name: str,
         subfolder = folder / KEPT_FOLDERS.get(record.mode, "Other")
         subfolder.mkdir(exist_ok=True)
         dest = _free_file(subfolder, slugify(record.name) or "sample")
+        midi = source.with_suffix(".mid")
+        if midi.exists():
+            shutil.copy2(midi, dest.with_suffix(".mid"))  # loops travel with their notes
         if fmt is None:
             shutil.copy2(source, dest)
         else:

@@ -39,6 +39,7 @@ export const api = {
   tags: () => request("/api/tags"),
   exportPack: (body) => request("/api/packs", { method: "POST", body }),
   stems: (id, exportFormat) => request(`/api/samples/${id}/stems`, { method: "POST", body: { export: exportFormat } }),
+  midi: (id) => request(`/api/samples/${id}/midi`, { method: "POST" }),
   instrument: (body) => request("/api/instruments", { method: "POST", body }),
   styles: () => request("/api/styles"),
   training: () => request("/api/training"),

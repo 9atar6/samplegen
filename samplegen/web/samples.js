@@ -89,6 +89,23 @@ function openEditor(row, onSaved) {
   name.focus();
 }
 
+async function extractMidi(row, button) {
+  if (button.classList.contains("busy")) return;
+  button.classList.add("busy");
+  button.title = "Listening for notes…";
+  try {
+    row.midi = await api.midi(row.record.id);
+    button.classList.add("ready");
+    button.title = `MIDI ready (${row.midi.notes} notes): drag ♪ into your DAW · click to redo`;
+    toast(`${row.midi.notes} notes found. Drag the ♪ button into your DAW.`, "ok");
+  } catch (err) {
+    button.title = "Extract MIDI notes (M)";
+    toast(err.message, "error");
+  } finally {
+    button.classList.remove("busy");
+  }
+}
+
 function fileName(record) {
   return record.rel_path.split("/").pop();
 }
@@ -143,9 +160,11 @@ export function createSampleRow(record, { onChange } = {}) {
   const sourceBtn = iconButton("swap", "Use as source for Transform / Edit (T)", "use-source");
   const stemsBtn = iconButton("stems", "Split into stems (S)", "stems");
   const editBtn = iconButton("edit", "Rename / tags (E)", "edit");
+  const midiBtn = iconButton("midi", "Extract MIDI notes (M)", "midi");
+  midiBtn.draggable = true;
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.append(favBtn, keepBtn, trashBtn, editBtn, sourceBtn, stemsBtn, revealBtn);
+  actions.append(favBtn, keepBtn, trashBtn, editBtn, sourceBtn, stemsBtn, midiBtn, revealBtn);
   el.append(playBtn, canvas, info, actions);
 
   const row = { el, record, canvas, duration: null, loading: false };
@@ -159,6 +178,7 @@ export function createSampleRow(record, { onChange } = {}) {
     title.title = r.prompt;
     meta.textContent = describe(r);
     stemsBtn.hidden = r.mode === "instrument";
+    midiBtn.hidden = r.mode === "instrument"; // instruments already are notes
     el.classList.toggle("kept", r.status === "kept");
     el.classList.toggle("trashed", r.status === "trashed");
     el.classList.toggle("favorite", r.favorite);
@@ -188,8 +208,22 @@ export function createSampleRow(record, { onChange } = {}) {
     useAsSource: () => emit("samplegen:use-source"),
     stems: () => { if (row.record.mode !== "instrument") emit("samplegen:stems"); },
     edit: () => openEditor(row, (updated) => update(Promise.resolve(updated))),
+    midi: () => extractMidi(row, midiBtn),
   };
   el.sampleActions = actionsApi;
+  midiBtn.addEventListener("click", actionsApi.midi);
+  midiBtn.addEventListener("dragstart", (e) => {
+    e.stopPropagation(); // drag the MIDI file, not the row's WAV
+    if (!row.midi) {
+      e.preventDefault();
+      toast("Click ♪ first to extract the notes, then drag it into your DAW.", "info");
+      return;
+    }
+    const url = new URL(row.midi.url, location.href).href;
+    e.dataTransfer.setData("DownloadURL", `audio/midi:${row.midi.filename}:${url}`);
+    e.dataTransfer.setData("text/uri-list", url);
+    e.dataTransfer.effectAllowed = "copy";
+  });
   sourceBtn.addEventListener("click", actionsApi.useAsSource);
   stemsBtn.addEventListener("click", actionsApi.stems);
   editBtn.addEventListener("click", actionsApi.edit);

@@ -41,12 +41,12 @@ echo     Press any key to start (or close this window to cancel).
 pause >nul
 echo.
 
-echo [1/8] Checking your PC...
+echo [1/9] Checking your PC...
 call :check_disk
 call :check_gpu
 
 echo.
-echo [2/8] uv (the tool that installs Python for the app)...
+echo [2/9] uv (the tool that installs Python for the app)...
 where uv >nul 2>&1
 if errorlevel 1 (
   echo       downloading uv...
@@ -58,13 +58,13 @@ if errorlevel 1 (
 where uv >nul 2>&1 || goto :fail
 
 echo.
-echo [3/8] The app's Python environment...
+echo [3/9] The app's Python environment...
 echo       This can take a few minutes with nothing moving on screen. That's normal.
 uv sync >> "%LOG%" 2>&1 || goto :fail
 echo       done
 
 echo.
-echo [4/8] The sound engine (ComfyUI %COMFY_VERSION%, about 2 GB)...
+echo [4/9] The sound engine (ComfyUI %COMFY_VERSION%, about 2 GB)...
 if exist "%COMFY%\main.py" (
   echo       already installed
 ) else (
@@ -81,7 +81,7 @@ if not exist "%NODES%\samplegen_nodes\__init__.py" (
 )
 
 echo.
-echo [5/8] Sound models (about 16 GB, the long part)...
+echo [5/9] Sound models (about 16 GB, the long part)...
 echo       Each file shows its own progress bar.
 call :get "%CKPTS%\stable_audio_3_small_sfx.safetensors" "%HF%/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_small_sfx.safetensors" || goto :fail
 call :get "%CKPTS%\stable_audio_3_medium.safetensors" "%HF%/Comfy-Org/stable-audio-3/resolve/main/checkpoints/stable_audio_3_medium.safetensors" || goto :fail
@@ -91,7 +91,7 @@ call :get "%CKPTS%\Foundation-1.2-Keybeds.safetensors" "%HF%/RoyalCities/Foundat
 call :get "%TENC%\t5_base.safetensors" "%HF%/google-t5/t5-base/resolve/main/model.safetensors" || goto :fail
 
 echo.
-echo [6/8] Stem splitting (AudioSeparation extension)...
+echo [6/9] Stem splitting (AudioSeparation extension)...
 if exist "%NODES%\AudioSeparation\__init__.py" (
   echo       already installed
 ) else (
@@ -106,7 +106,11 @@ echo       installing its Python packages (a minute or two)...
 "%EPY%" -s -m pip install -r "%NODES%\AudioSeparation\requirements.txt" >> "%LOG%" 2>&1 || goto :fail
 
 echo.
-echo [7/8] Where should your samples be saved?
+echo [7/9] MIDI extraction (turns loops and melodies into MIDI notes)...
+call "%ROOT%tools\install-midi.bat" nopause || goto :fail
+
+echo.
+echo [8/9] Where should your samples be saved?
 if exist "%ROOT%samplegen.local.json" (
   echo       already chosen earlier ^(to change it, delete samplegen.local.json and run install.bat again^)
   goto :library_done
@@ -126,7 +130,7 @@ echo       Samples will be saved in %LIB%
 :library_done
 
 echo.
-echo [8/8] Style training (optional, you can add it any time later)
+echo [9/9] Style training (optional, you can add it any time later)
 echo       Teach samplegen your own sounds: give it 20-50 of your samples and it learns their
 echo       character. It needs about 6 GB more and a free Hugging Face account; the setup opens
 echo       the web pages you need and tells you exactly what to click.

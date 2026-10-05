@@ -28,13 +28,17 @@ def loop_seconds(bpm: float, bars: int) -> float:
     return 60.0 / bpm * BEATS_PER_BAR * bars
 
 
-def plan_generation(target_seconds: float, sample_rate: int) -> GenerationPlan:
+def plan_generation(target_seconds: float, sample_rate: int, continuation_seconds: float = 0.0) -> GenerationPlan:
+    """`continuation_seconds`: extra audio past the end, generated as part of the same take
+    (a seamless ambience crossfades it into its start). The model is told the full length,
+    so it doesn't wind the sound down at the loop point."""
     if target_seconds <= 0:
         raise ValueError(f"target_seconds must be positive (got {target_seconds})")
+    generated = target_seconds + continuation_seconds
     return GenerationPlan(
         target_seconds=target_seconds,
         target_samples=int(round(target_seconds * sample_rate)),
-        latent_seconds=max(MIN_LATENT_SECONDS, target_seconds + GENERATION_PAD_SECONDS),
+        latent_seconds=max(MIN_LATENT_SECONDS, generated + GENERATION_PAD_SECONDS),
         # Models were trained with whole-second duration conditioning.
-        conditioning_seconds=max(1, math.ceil(round(target_seconds, 6))),
+        conditioning_seconds=max(1, math.ceil(round(generated, 6))),
     )

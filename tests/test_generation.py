@@ -107,3 +107,42 @@ def test_generator_propagates_engine_errors(tmp_path):
         generator.run(sfx(), "job4")
     assert library.list() == []
     library.close()
+
+
+def test_broken_engine_output_is_refused_not_saved(tmp_path):
+    from samplegen.comfy import EngineError
+    from samplegen.generation import read_engine_wav
+
+    path = tmp_path / "nan.wav"
+    sf.write(str(path), np.full((100, 2), np.nan), 44100, subtype="FLOAT")
+    with pytest.raises(EngineError, match="broken audio"):
+        read_engine_wav(path)
+    assert not path.exists()  # the engine's scratch file is cleared either way
+
+
+def test_seamless_ambience_loops_at_exact_length(setup):
+    generator, client, library, _ = setup
+    records = generator.run(sfx(model="sa3-medium", prompt="rain on a tin roof", duration=8.0,
+                                variations=1, seamless=True), "amb1")
+    # 3 s of continuation is generated past the end, for the 2 s crossfade into the start
+    assert client.graphs[0]["latent"]["inputs"]["seconds"] == pytest.approx(8.0 + 3.0 + 0.25)
+    record = records[0]
+    assert record.params["loop"] is True and record.params["seamless"] is True
+    audio, _ = sf.read(str(library.path_of(record)), always_2d=True)
+    assert len(audio) == 8 * 44100
+    assert np.abs(audio[0] - audio[-1]).max() < 0.05  # the wrap is continuous, not a cut
+
+
+@pytest.mark.parametrize("request_, message", [
+    (sfx(seamless=True, duration=3.0), "at least 6"),
+    (loop(seamless=True), "SFX and Free"),
+])
+def test_seamless_validation(request_, message):
+    with pytest.raises(ValueError, match=message):
+        request_.validate()
+
+
+def test_single_long_take_is_not_held_to_the_batch_cap():
+    sfx(model="sa3-medium", duration=300.0, variations=1).validate()  # 5 minutes, one take
+    with pytest.raises(ValueError, match="too much audio"):
+        sfx(model="sa3-medium", duration=100.0, variations=2).validate()

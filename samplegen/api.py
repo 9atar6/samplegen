@@ -21,6 +21,7 @@ from .catalog import KEYS, LOOP_BARS, LOOP_BPMS, LOOP_TAGS, MODELS, SCALES
 from .generation_request import GenerationRequest
 from .jobs import JobManager
 from .library import FileInUse, Library, SampleNotFound
+from .midi import Transcriber
 from .setup_check import FIX as SETUP_FIX
 from .setup_check import missing_parts
 from .sources import MAX_UPLOAD_BYTES, SourceNotFound, SourceStore
@@ -60,6 +61,7 @@ class GenerateIn(BaseModel):
     extend_seconds: float = 4.0
     style: str | None = Field(None, max_length=40)
     style_strength: float = 1.0
+    seamless: bool = False
 
 
 class StatusIn(BaseModel):
@@ -79,9 +81,12 @@ class AppContext:
     styles: StyleStore | None = None
     training: TrainingManager | None = None
     describer: Describer | None = None
+    midi: Transcriber | None = None
 
     def __post_init__(self):
         root = self.library.root
+        if self.midi is None:  # not installed: routes answer with how to install it
+            self.midi = Transcriber(root / "_no_midi" / "python.exe", root / "_no_midi" / "transcribe.py")
         if self.sources is None:
             self.sources = SourceStore(root)
         if self.styles is None:
@@ -145,7 +150,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     @app.get("/api/status")
     def status():
         return {"engine": ctx.engine.state, "engine_error": ctx.engine.error, "library": str(ctx.library.root),
-                "missing": missing_parts(ctx.engine.engine_dir), "missing_fix": SETUP_FIX}
+                "missing": missing_parts(ctx.engine.engine_dir, ctx.midi.python), "missing_fix": SETUP_FIX}
 
     @app.get("/api/catalog")
     def catalog():

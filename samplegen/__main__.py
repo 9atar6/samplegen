@@ -20,6 +20,7 @@ from .engine import Engine
 from .generation import Generator
 from .jobs import JobManager
 from .library import Library
+from .midi import Transcriber
 from .sources import SourceStore
 from .styles import StyleStore
 from .training import TrainingManager
@@ -62,6 +63,7 @@ def main() -> int:
             pass  # engine not running: nothing to free
 
     training = TrainingManager(PROJECT_DIR, settings.library_dir, settings.engine_dir, styles, free_engine_memory)
+    threading.Thread(target=training.clean_old_runs, name="training-cleanup", daemon=True).start()
     jobs = JobManager(Generator(engine, client, library, settings.comfy_output_dir, sources=sources,
                                 comfy_input_dir=settings.comfy_input_dir, styles=styles),
                       busy=training.busy_reason)
@@ -81,7 +83,9 @@ def main() -> int:
     try:
         describer = Describer(training.python, PROJECT_DIR / "trainer" / "clap_describe.py",
                               log_path=PROJECT_DIR / "logs" / "autodescribe.log")
-        uvicorn.run(create_app(AppContext(library, jobs, engine, sources, styles, training, describer)), host="127.0.0.1",
+        midi = Transcriber(PROJECT_DIR / "midi" / ".venv" / "Scripts" / "python.exe", PROJECT_DIR / "midi" / "transcribe.py")
+        context = AppContext(library, jobs, engine, sources, styles, training, describer, midi)
+        uvicorn.run(create_app(context), host="127.0.0.1",
                     port=settings.app_port, log_level="warning")
     finally:
         jobs.stop()

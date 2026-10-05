@@ -11,7 +11,7 @@ from .catalog import MODELS
 FIX = "Run install.bat again: it only downloads what's missing."
 
 
-def missing_parts(engine_dir: Path) -> list[str]:
+def missing_parts(engine_dir: Path, midi_python: Path | None = None) -> list[str]:
     """Human-readable names of missing pieces (empty list: everything is there).
 
     Base models are left out: they're only needed for trained styles, which
@@ -31,4 +31,6 @@ def missing_parts(engine_dir: Path) -> list[str]:
         missing.append("samplegen engine nodes (custom_nodes/samplegen_nodes)")
     if not (nodes / "AudioSeparation" / "__init__.py").is_file():
         missing.append("stem splitting extension (custom_nodes/AudioSeparation)")
+    if midi_python is not None and not Path(midi_python).is_file():
+        missing.append("MIDI extraction (tools/install-midi.bat)")
     return missing

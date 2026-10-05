@@ -46,7 +46,7 @@
               <button type="button" class="key active" data-mode="sfx" title="Sound effects and one-shots from text"><span data-icon="bolt"></span><b>SFX</b><small>one-shots</small><i class="led"></i></button>
               <button type="button" class="key" data-mode="loop" title="Tempo- and key-locked musical loops"><span data-icon="loop"></span><b>Loop</b><small>bpm · key</small><i class="led"></i></button>
               <button type="button" class="key" data-mode="free" title="Textures, drones, long musical material"><span data-icon="drone"></span><b>Free</b><small>textures</small><i class="led"></i></button>
-              <button type="button" class="key" data-mode="transform" title="Turn a sound you have into something new"><span data-icon="shuffle"></span><b>Transform</b><small>your audio</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="transform" title="Turn a sound you have, or your voice, into something new"><span data-icon="shuffle"></span><b>Transform</b><small>audio · voice</small><i class="led"></i></button>
               <button type="button" class="key" data-mode="edit" title="Regenerate part of a sound, or extend it"><span data-icon="scissors"></span><b>Edit</b><small>inpaint</small><i class="led"></i></button>
               <button type="button" class="key" data-mode="instrument" title="A playable sampler instrument across the keyboard"><span data-icon="keys"></span><b>Instrument</b><small>sampler</small><i class="led"></i></button>
             </div>
@@ -58,6 +58,12 @@
               <span data-icon="upload"></span>
               <b>Drop a sound here</b>
               <small>or click to browse · WAV AIFF FLAC OGG MP3 · or <span class="inline-glyph" data-icon="swap"></span> on any sample</small>
+            </div>
+            <div class="voice-row" id="source-voice">
+              <button type="button" class="ghost record-btn" id="source-record" aria-pressed="false">
+                <i class="rec-dot" aria-hidden="true"></i><span id="record-label">Record your voice</span>
+              </button>
+              <small class="hint">Imitate it — “pshhh”, “brrrm”, “tk-tk” — then describe what it should become.</small>
             </div>
             <input type="file" id="source-file" accept="audio/*,.wav,.aif,.aiff,.flac,.ogg,.mp3" hidden>
             <div id="source-loaded" class="source-loaded" hidden>
@@ -158,6 +164,9 @@
               <span>Length <output id="duration-out">4.0 s</output></span>
               <input type="range" id="duration" min="0.5" max="30" step="0.5" value="4">
             </label>
+            <label class="check" id="seamless-field" title="The end flows back into the start: ambiences, drones and textures you can loop forever">
+              <input type="checkbox" id="seamless"><span>Seamless loop <em>ambiences, drones, beds</em></span>
+            </label>
             <label class="field" id="variations-field">
               <span>Variations <output id="variations-out">4</output></span>
               <input type="range" id="variations" min="1" max="8" step="1" value="4">
@@ -228,6 +237,7 @@
               <li><kbd>T</kbd>use as source</li>
               <li><kbd>S</kbd>stems</li>
               <li><kbd>E</kbd>rename · tags</li>
+              <li><kbd>M</kbd>MIDI</li>
             </ul>
           </div>
         </div>

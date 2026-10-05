@@ -27,6 +27,8 @@ const PROMPT_COPY = {
 };
 
 const STYLE_MODES = ["sfx", "free"];
+const SEAMLESS_MODES = ["sfx", "free"];
+const MIN_SEAMLESS_SECONDS = 6;
 const VIEWS = ["generate", "library", "train"];
 
 const state = { catalog: null, mode: "sfx", scale: "minor", editOp: "inpaint", space: "Dry", styles: [] };
@@ -158,6 +160,7 @@ function setMode(mode, preferredModel) {
   $("#variations-field").hidden = isInstrument;
   $("#shape-section").hidden = isInstrument;
   $("#trim-field").hidden = mode === "loop" || usesSource || isInstrument;
+  $("#seamless-field").hidden = !SEAMLESS_MODES.includes(mode);
   $("#source-panel").hidden = !usesSource;
   $("#transform-fields").hidden = mode !== "transform";
   $("#edit-fields").hidden = mode !== "edit";
@@ -227,7 +230,10 @@ function onModelChange() {
 }
 
 function updateOutputs() {
-  $("#duration-out").textContent = `${Number($("#duration").value).toFixed(1)} s`;
+  const seconds = Number($("#duration").value);
+  $("#duration-out").textContent = seconds >= 60
+    ? `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")} min`
+    : `${seconds.toFixed(1)} s`;
   $("#variations-out").textContent = $("#variations").value;
   $("#strength-out").textContent = Number($("#strength").value).toFixed(2);
   $("#style-strength-out").textContent = Number($("#style-strength").value).toFixed(2);
@@ -321,6 +327,7 @@ function readForm() {
     space: state.space,
     style: STYLE_MODES.includes(state.mode) && $("#style").value ? $("#style").value : null,
     style_strength: Number($("#style-strength").value),
+    seamless: SEAMLESS_MODES.includes(state.mode) && $("#seamless").checked,
   };
 }
 
@@ -350,6 +357,7 @@ function applyForm(saved) {
   $("#normalize").checked = saved.normalize_db !== null;
   if (saved.normalize_db !== null && saved.normalize_db !== undefined) set("#normalize-db", saved.normalize_db);
   $("#trim").checked = saved.trim_silence !== false;
+  $("#seamless").checked = Boolean(saved.seamless);
   set("#style-strength", saved.style_strength);
   state.savedStyle = saved.style;
   setScale(saved.scale || "minor");
@@ -442,7 +450,7 @@ function moveFocus(delta) {
   next.scrollIntoView({ block: "nearest" });
 }
 
-const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit" };
+const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit", m: "midi" };
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -531,6 +539,15 @@ async function init() {
     state.savedStyle = undefined;
   });
   $("#style").addEventListener("change", () => { syncStyleField(); saveForm(); });
+  $("#seamless").addEventListener("change", () => {
+    // A seamless loop needs room for its 2 s crossfade: lift a one-shot length to something ambient.
+    const duration = $("#duration");
+    if ($("#seamless").checked && Number(duration.value) < MIN_SEAMLESS_SECONDS) {
+      duration.value = String(Math.min(30, Number(duration.max)));
+      setFill(duration);
+      updateOutputs();
+    }
+  });
   initTrain();
   for (const chip of document.querySelectorAll("#try-prompts .chip")) {
     chip.addEventListener("click", () => {

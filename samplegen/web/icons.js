@@ -27,7 +27,9 @@ const PATHS = {
   drone: '<path d="M2 12c2.5-6 4.5-6 7 0s4.5 6 7 0 4.5-6 6 0"/>',
   bolt: '<path d="M13 2.5L4.5 13.5H12l-1 8 8.5-11H12z"/>',
   alert: '<path d="M12 3.5l9.5 16.5h-19zM12 10v4.5M12 17.5h.01"/>',
-  grip: '<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/>',
+  midi: '<path d="M9 18V5.5l11-2V16"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>',
+  grip:'<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/>',
 };
 
 export function icon(name, size = 18) {

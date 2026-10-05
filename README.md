@@ -42,7 +42,14 @@ the first install.
 | **Edit** | Stable Audio 3 (SFX or Medium) | **Regenerate selection** (drag across the waveform) or **Extend** a sound |
 | **Instrument** | Foundation-1.2 Keybeds | a playable sampler instrument across a note range, as Decent Sampler (`.dspreset`) + SFZ |
 
-On any sample: **Split into stems** (`S`, Demucs htdemucs_ft), **rename / tags** (`E`), **use as source** (`T`).
+On any sample: **Split into stems** (`S`, Demucs htdemucs_ft), **rename / tags** (`E`), **use as source** (`T`),
+**MIDI** (`M`, Spotify basic-pitch: the notes of a loop, bass line or melody as a `.mid`, at the loop's tempo; drag the
+♪ button into your DAW. The `.mid` lives next to the WAV and goes into packs too).
+
+- **Seamless loop** (SFX / Free): ambiences, drones and beds whose end flows back into their start — the model plays
+  on past the end and that continuation is crossfaded (2 s, equal-power) into the beginning. Up to ~6 min with Medium.
+- **Voice to sound** (Transform / Edit): press **Record your voice**, imitate the sound ("pshhh", "brrrm", "tk-tk"),
+  then describe what it should become. The rhythm and envelope of your voice drive the result.
 Library: filter by tag, search, and **Export pack** (copies what's listed into `Packs\<name>\`, optionally
 converted, with a `samples.csv` of prompts, seeds, tempo, key and tags).
 
@@ -103,7 +110,8 @@ install.bat          install / repair everything
 samplegen/           the app (Python backend + web UI in samplegen/web)
 engine_nodes/        samplegen's own ComfyUI nodes (float WAV in/out, Stable Audio 3 inpainting)
 trainer/             style-training helpers (LoRA converter, CLAP tagger)
-tools/               install-training.bat (optional part of install), run-tests.bat (developers)
+tools/               install-training.bat (optional), install-midi.bat (part of install), run-tests.bat (developers)
+midi/                MIDI extraction script (its own Python in midi/.venv, created by install)
 tests/               test suite (engine faked, no GPU needed)
 engine/              ComfyUI + models              (created by install.bat, not in git)
 trainer/stable-audio-3/  official trainer            (created by install, not in git)
@@ -113,7 +121,7 @@ trainer/stable-audio-3/  official trainer            (created by install, not in
 
 samplegen's own code is yours to use and share with friends. The things it downloads keep their own licenses:
 Stable Audio 3 and Foundation-1 (Stability AI Community License: free, including commercial use under
-$1M annual revenue), ComfyUI (GPL-3.0), AudioSeparation (GPL-3.0), CLAP (Apache-2.0). The fonts in
+$1M annual revenue), ComfyUI (GPL-3.0), AudioSeparation (GPL-3.0), CLAP (Apache-2.0), basic-pitch (Apache-2.0). The fonts in
 `samplegen/web/fonts` are under the SIL Open Font License.
 
 ## Development

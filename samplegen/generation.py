@@ -16,7 +16,7 @@ from .audio import (
 )
 from .catalog import MODELS, SAMPLE_RATE
 from .comfy import ComfyClient, EngineError
-from .generation_request import MAX_SEED, GenerationRequest, sample_name, wav_comment
+from .generation_request import MAX_SEED, SEAMLESS_CROSSFADE_SECONDS, GenerationRequest, sample_name, wav_comment
 from .instruments import (
     INSTRUMENT_DIR, InstrumentRequest, chunk_notes, chunk_seconds, keybed_prompt, normalize_together,
     preview_run, slice_chunk, write_instrument,
@@ -197,7 +197,7 @@ class Generator:
         for output in outputs:
             raw_path = self._raw_output_path(output)
             stem = stem_from_filename(output.filename, job_id)
-            audio, sr = read_wav(raw_path)
+            audio, sr = read_engine_wav(raw_path)
             raw_path.unlink(missing_ok=True)
             if audio.size == 0 or np.abs(audio).max() < SILENT_PEAK:
                 continue  # nothing in this stem (common for sound effects)
@@ -230,13 +230,18 @@ class Generator:
             spec = MODELS[style.model_key]
             lora = (style.lora_file, request.style_strength)
             params = {"style": style.slug, "style_name": style.name, "style_strength": request.style_strength}
-        plan = plan_generation(request.target_seconds(), SAMPLE_RATE)
+        plan = plan_generation(request.target_seconds(), SAMPLE_RATE, request.continuation_seconds)
         graph = build_text_to_audio(spec, prompt, negative, plan, seed, request.variations, job_id, lora=lora)
+        looping = request.is_loop or request.is_seamless
         options = PostOptions(
-            target_samples=plan.target_samples, is_loop=request.is_loop, normalize_db=request.normalize_db,
-            trim_silence=request.trim_silence and not request.is_loop,
+            target_samples=plan.target_samples, is_loop=looping, normalize_db=request.normalize_db,
+            trim_silence=request.trim_silence and not looping,
             fade_in_ms=request.fade_in_ms, fade_out_ms=request.fade_out_ms,
+            **({"loop_crossfade_ms": SEAMLESS_CROSSFADE_SECONDS * 1000, "equal_power_loop": True}
+               if request.is_seamless else {}),
         )
+        if request.is_seamless:
+            params = {**params, "loop": True, "seamless": True}  # plays looped, exports wrap-safe
         return PreparedJob(graph, lambda raw, sr: postprocess(raw, sr, options), params)
 
     def _prepare_transform(self, request, spec, prompt, negative, seed, job_id) -> PreparedJob:
@@ -296,7 +301,7 @@ class Generator:
 
     def _finish(self, request: GenerationRequest, prepared: PreparedJob, raw_path: Path, name: str, seed: int,
                 variation: int, batch_id: str, job_id: str) -> SampleRecord:
-        raw, sr = read_wav(raw_path)
+        raw, sr = read_engine_wav(raw_path)
         audio = prepared.finish(raw, sr)
         staged = self.staging_dir / f"{job_id}_{variation:02d}.wav"
         write_wav(staged, audio, sr, request.export, title=name, comment=wav_comment(request, seed, variation),

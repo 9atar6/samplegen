@@ -26,6 +26,7 @@ KEPT_FOLDERS = {
     "sfx": "SFX", "loop": "Loops", "free": "Music", "transform": "Transformed", "edit": "Edited",
     "stems": "Stems", "instrument": "Instruments",
 }
+SIDECARS = (".mid",)  # files that belong to a sample and move with it
 MAX_SLUG_LENGTH = 60
 MAX_NAME_CHARS = 120
 MAX_TAGS = 20
@@ -296,6 +297,16 @@ class Library:
             if moved:
                 os.replace(dest, source)
             raise
+        for ext in SIDECARS:  # e.g. the sample's MIDI follows it into Kept/, _trash/, a new name
+            extra = source.with_suffix(ext)
+            if extra.exists() and not dest.with_suffix(ext).exists():
+                try:
+                    os.replace(extra, dest.with_suffix(ext))
+                except OSError:
+                    pass  # the sample itself moved; a sidecar left behind can be made again
+
+    def midi_path(self, record: SampleRecord) -> Path:
+        return self.path_of(record).with_suffix(".mid")
 
 
 def _like_escape(text: str) -> str:

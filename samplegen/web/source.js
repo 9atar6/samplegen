@@ -3,6 +3,8 @@
 import { api } from "./api.js";
 import { icon } from "./icons.js";
 import * as player from "./player.js";
+import { toast } from "./toast.js";
+import { micSupported, startRecording } from "./voice.js";
 import { drawWaveform } from "./waveform.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -105,8 +107,10 @@ async function loadFile(file) {
   try {
     setSource(await api.uploadSource(file));
     status.hidden = true;
+    return true;
   } catch (err) {
     status.textContent = err.message;
+    return false;
   }
 }
 
@@ -152,6 +156,7 @@ export function setSource(source) {
   state.buffer = null;
   state.selection = null;
   $("#source-drop").hidden = Boolean(source);
+  $("#source-voice").hidden = Boolean(source);
   $("#source-loaded").hidden = !source;
   if (source) {
     $("#source-name").textContent = source.name;
@@ -185,10 +190,62 @@ export function setSelectable(selectable) {
   updateSelectionLabel();
 }
 
+// ---------- voice to sound ----------
+const VOICE_STRENGTH = 0.75; // high enough to replace the voice's timbre, low enough to keep its rhythm
+
+function bindRecorder() {
+  const button = $("#source-record");
+  const label = $("#record-label");
+  if (!micSupported()) {
+    $("#source-voice").remove();
+    return;
+  }
+  let session = null;
+  const finish = async () => {
+    if (!session) return;
+    const current = session;
+    session = null;
+    button.classList.remove("recording");
+    button.setAttribute("aria-pressed", "false");
+    label.textContent = "Record your voice";
+    try {
+      const file = await current.stop();
+      if ($("#transform-fields").hidden === false && Number($("#strength").value) < VOICE_STRENGTH) {
+        $("#strength").value = String(VOICE_STRENGTH);
+        $("#strength").dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (await loadFile(file)) {
+        toast("Got it. Now describe what it should become, and Generate.", "ok");
+        $("#prompt").focus();
+      }
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  };
+  button.addEventListener("click", async () => {
+    if (session) return finish();
+    try {
+      player.stop();
+      session = await startRecording({
+        onTick: (s) => { label.textContent = `Recording… ${s.toFixed(1)} s — click to stop`; },
+        onLimit: finish,
+      });
+      button.classList.add("recording");
+      button.setAttribute("aria-pressed", "true");
+    } catch (err) {
+      session = null;
+      const blocked = err.name === "NotAllowedError" || err.name === "SecurityError";
+      toast(blocked ? "The microphone is blocked: allow it from the icon at the left of the address bar, then try again."
+        : err.name === "NotFoundError" ? "No microphone found." : `Couldn't start recording: ${err.message}`, "error");
+    }
+  });
+}
+
 export function initSourcePanel({ onChange }) {
   onChangeHandler = onChange || (() => {});
   bindDropzone();
   bindCanvas();
+  bindRecorder();
   $("#source-play").innerHTML = icon("play");
   $("#source-play").addEventListener("click", () => {
     if (!state.source) return;

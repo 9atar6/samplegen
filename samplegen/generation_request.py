@@ -17,6 +17,10 @@ MIN_STRENGTH = 0.05
 MAX_BATCH_AUDIO_SECONDS = 160.0
 MAX_SEED = 2**32 - 1
 STYLE_MODES = ("sfx", "free")
+SEAMLESS_MODES = ("sfx", "free")
+SEAMLESS_CROSSFADE_SECONDS = 2.0  # long and equal-power: right for rain, room tone, drones
+SEAMLESS_SPARE_SECONDS = 1.0      # margin so the crossfade never runs out of continuation
+MIN_SEAMLESS_SECONDS = 6.0        # shorter than this, a 2 s crossfade is most of the sound
 
 
 @dataclass(frozen=True)
@@ -47,10 +51,21 @@ class GenerationRequest:
     # Trained style (LoRA slug) and how strongly to apply it
     style: str | None = None
     style_strength: float = 1.0
+    # SFX / Free: make the take loop seamlessly (ambiences, drones, textures)
+    seamless: bool = False
 
     @property
     def is_loop(self) -> bool:
         return self.mode == "loop"
+
+    @property
+    def is_seamless(self) -> bool:
+        return self.seamless and self.mode in SEAMLESS_MODES
+
+    @property
+    def continuation_seconds(self) -> float:
+        """Extra audio generated past the end, crossfaded into the start of a seamless take."""
+        return SEAMLESS_CROSSFADE_SECONDS + SEAMLESS_SPARE_SECONDS if self.is_seamless else 0.0
 
     @property
     def uses_source(self) -> bool:
@@ -107,11 +122,17 @@ class GenerationRequest:
             self._validate_source(source_seconds)
         elif not MIN_SECONDS <= self.duration <= spec.max_seconds:
             raise ValueError(f"Duration must be between {MIN_SECONDS} and {spec.max_seconds:.0f} seconds.")
+        if self.seamless:
+            if self.mode not in SEAMLESS_MODES:
+                raise ValueError("Seamless loops are for SFX and Free modes (Loop mode always loops).")
+            if self.duration < MIN_SEAMLESS_SECONDS:
+                raise ValueError(f"Seamless loops need at least {MIN_SEAMLESS_SECONDS:.0f} seconds.")
 
-        total = self.target_seconds(source_seconds)
+        total = self.target_seconds(source_seconds) + self.continuation_seconds
         if total > spec.max_seconds:
             raise ValueError(f"{spec.label} handles up to {spec.max_seconds:.0f} s; this would be {total:.1f} s.")
-        if total * self.variations > MAX_BATCH_AUDIO_SECONDS:
+        # The cap is about several takes rendered at once; a single long take may use the model's full length.
+        if self.variations > 1 and total * self.variations > MAX_BATCH_AUDIO_SECONDS:
             raise ValueError(
                 f"That's too much audio for one batch on this GPU (max {MAX_BATCH_AUDIO_SECONDS:.0f} s total). "
                 "Use fewer variations or a shorter duration."

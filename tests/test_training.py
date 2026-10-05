@@ -32,7 +32,10 @@ FAKE_TRAINER = textwrap.dedent("""
         f.write("step,train/loss\\n")
         for s in range(0, int(a.steps) + 1, 50): f.write(f"{s},0.1\\n")
     for s in (100, int(a.steps)): (out / f"epoch=0-step={s}.ckpt").write_text("ckpt")
-    (out / "args.txt").write_text(" ".join(sys.argv[1:]))
+    import soundfile
+    print("ARGS", " ".join(sys.argv[1:]))
+    print("CAPTION0", sorted(p.read_text(encoding="utf-8") for p in data.glob("*.txt"))[0])
+    print("RATE", soundfile.info(str(next(data.glob("*.wav")))).samplerate)
     print("training finished\\r100%")
 """)
 
@@ -140,14 +143,28 @@ def test_train_end_to_end_registers_a_style(setup):
     assert (style.name, style.base, style.clips, style.steps) == ("Grit Foley", "sfx", 6, 200)
     assert styles.lora_path("grit-foley").read_bytes() == b"lora"
     work = next((manager.work_root).iterdir())
-    args = (work / "out" / "args.txt").read_text()
+    log = (work / "train.log").read_text(encoding="utf-8")
     for expected in ("--adapter_type lora", "--exclude conditioners", "--num_workers 0", "--demo_every 201",
                      "--model small-sfx-base"):
-        assert expected in args
-    captions = sorted(p.read_text(encoding="utf-8") for p in (work / "data").glob("*.txt"))
-    assert captions[0] == "gritty foley, sound 0"
-    assert sf.info(str(next((work / "data").glob("*.wav")))).samplerate == 44100
+        assert expected in log
+    assert "CAPTION0 gritty foley, sound 0" in log
+    assert "RATE 44100" in log
+    # the dataset copy and checkpoints are gone afterwards; the log stays
+    assert not (work / "data").exists() and not (work / "out").exists()
     assert manager.busy_reason() is None
+
+
+def test_clean_old_runs_keeps_logs_and_nothing_else_is_touched(setup):
+    manager, *_ = setup
+    run = manager.work_root / "old-20260101-000000"
+    for sub in ("data", "out"):
+        (run / sub).mkdir(parents=True)
+        (run / sub / "x.bin").write_bytes(b"x")
+    (run / "train.log").write_text("log")
+    (manager.work_root / "notes.txt").write_text("keep me")
+    assert manager.clean_old_runs() == 2
+    assert (run / "train.log").exists() and not (run / "data").exists() and not (run / "out").exists()
+    assert (manager.work_root / "notes.txt").exists()
 
 
 def test_training_failure_is_reported_with_log(setup, monkeypatch):
