@@ -50,6 +50,8 @@
               <button type="button" class="key" data-mode="transform" title="Turn a sound you have, or your voice, into something new"><span data-icon="shuffle"></span><b>Transform</b><small>audio · voice</small><i class="led"></i></button>
               <button type="button" class="key" data-mode="edit" title="Regenerate part of a sound, or extend it"><span data-icon="scissors"></span><b>Edit</b><small>inpaint</small><i class="led"></i></button>
               <button type="button" class="key" data-mode="instrument" title="A playable sampler instrument across the keyboard"><span data-icon="keys"></span><b>Instrument</b><small>sampler</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="kit" title="A full drum kit in one style, with round robins, ready for your sampler"><span data-icon="stems"></span><b>Drum kit</b><small>12 pieces</small><i class="led"></i></button>
+              <button type="button" class="key" data-mode="layers" title="Build an impact from a transient, a body and a tail, like a sound designer would"><span data-icon="wave"></span><b>Layers</b><small>designer</small><i class="led"></i></button>
             </div>
           </section>
 
@@ -136,6 +138,29 @@
               <small class="hint lcd-hint" id="instrument-estimate"></small>
             </div>
 
+            <div id="kit-fields" hidden>
+              <label class="field"><span>Kit name <em>optional</em></span><input id="kit-name" maxlength="80" placeholder="Dusty Boom Bap"></label>
+              <label class="field"><span>Takes per piece <output id="kit-rr-out">3</output> <em>round robins</em></span><input type="range" id="kit-rr" min="1" max="4" step="1" value="3"></label>
+              <small class="hint">Kick, rimshot, snare, clap, closed &amp; open hat, three toms, crash, ride, percussion, on the General MIDI drum map. Playable in the Play tab, and as Decent Sampler / SFZ.</small>
+            </div>
+
+            <div id="layer-fields" hidden>
+              <label class="field"><span>Transient <em>the attack</em></span><input id="layer-transient" maxlength="400" placeholder="sharp metallic click"></label>
+              <label class="field"><span>Body <em>the weight</em></span><input id="layer-body" maxlength="400" placeholder="deep cinematic impact boom"></label>
+              <label class="field"><span>Tail <em>the decay and space</em></span><input id="layer-tail" maxlength="400" placeholder="long metallic reverb tail, debris"></label>
+              <div class="row3">
+                <label class="field"><span>Transient <output id="layer-g0-out">0 dB</output></span><input type="range" id="layer-g0" min="-24" max="6" step="1" value="0"></label>
+                <label class="field"><span>Body <output id="layer-g1-out">0 dB</output></span><input type="range" id="layer-g1" min="-24" max="6" step="1" value="0"></label>
+                <label class="field"><span>Tail <output id="layer-g2-out">-3 dB</output></span><input type="range" id="layer-g2" min="-24" max="6" step="1" value="-3"></label>
+              </div>
+              <div class="row3">
+                <label class="field"><span>Body delay <em>ms</em></span><input type="number" id="layer-body-offset" value="0" min="0" max="1000" step="5"></label>
+                <label class="field"><span>Tail delay <em>ms</em></span><input type="number" id="layer-tail-offset" value="30" min="0" max="2000" step="5"></label>
+                <label class="field"><span>Tail length <em>s</em></span><input type="number" id="layer-tail-seconds" value="4" min="0.5" max="30" step="0.5"></label>
+              </div>
+              <small class="hint">Each take saves the blended hit plus its three layers, so you can re-balance them in your DAW.</small>
+            </div>
+
             <div id="tag-groups" class="tag-groups" hidden></div>
 
             <div class="row-model">
@@ -203,6 +228,7 @@
         <div class="deck-foot">
           <p class="form-error" id="form-error" role="alert" hidden></p>
           <button type="submit" class="primary" id="generate-btn"><span data-icon="spark"></span><span>Generate</span><kbd>Ctrl ↵</kbd></button>
+          <button type="button" class="ghost batch-open" id="batch-open" title="Write a list of sounds and let samplegen make them all (overnight, if you like)"><span data-icon="tag"></span><span>Shot list…</span></button>
         </div>
       </form>
 
@@ -442,6 +468,42 @@
       </div>
     </section>
   </main>
+
+  <dialog class="batch-dialog" id="batch-dialog">
+    <form id="batch-form" method="dialog">
+      <div class="pack-title"><span data-icon="tag"></span><b>Shot list</b><small>one sound per line · samplegen makes them all, then you pick</small></div>
+      <label class="field"><span>Name <em>also the tag on every result</em></span><input id="batch-name" maxlength="60" placeholder="Forest level SFX"></label>
+      <label class="field"><span>Sounds</span><textarea id="batch-text" rows="10" spellcheck="false"></textarea></label>
+      <p class="hint" id="batch-info"></p>
+      <div class="row2">
+        <label class="field"><span>Model</span>
+          <select id="batch-model">
+            <option value="sa3-sfx">Small SFX · fast</option>
+            <option value="sa3-medium">Medium · best quality</option>
+          </select>
+        </label>
+        <label class="field"><span>Default length <em>s</em></span><input type="number" id="batch-seconds" value="4" min="0.5" max="380" step="0.5"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="batch-export"><span>When it's done, export everything as a pack</span></label>
+      <div id="batch-export-options" hidden>
+        <div class="row2">
+          <label class="field"><span>Loudness</span>
+            <select id="batch-loudness">
+              <option value="">Keep levels</option>
+              <option value="-14">−14 LUFS</option>
+              <option value="-18" selected>−18 LUFS</option>
+              <option value="-23">−23 LUFS</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="batch-rr" checked><span>Round-robin names</span></label>
+        </div>
+      </div>
+      <div class="pack-actions">
+        <button type="button" class="ghost" id="batch-cancel">Cancel</button>
+        <button type="submit" class="primary small" id="batch-start">Queue them all</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="app.js"></script>
 </body>

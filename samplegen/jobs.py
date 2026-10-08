@@ -10,12 +10,15 @@ from typing import Callable
 
 from .generation_request import GenerationRequest
 from .instruments import InstrumentRequest
+from .kits import KitRequest
+from .layers import LayerRequest
+from .power import keep_awake
 from .stems import StemRequest
 
-AnyRequest = GenerationRequest | StemRequest | InstrumentRequest
+AnyRequest = GenerationRequest | StemRequest | InstrumentRequest | KitRequest | LayerRequest
 
 log = logging.getLogger("samplegen.jobs")
-MAX_JOB_HISTORY = 100
+MAX_JOB_HISTORY = 2000  # a big overnight batch must still be readable when it ends
 
 
 @dataclass(frozen=True)
@@ -115,11 +118,15 @@ class JobManager:
         while True:
             job_id = self._queue.get()
             if job_id is None:
+                keep_awake(False)
                 return
             job = self.get(job_id)
             if job is None or job.state != "queued":
                 continue
+            keep_awake(True)  # an overnight batch must not stop when Windows wants to sleep
             self.run_now(job_id)
+            if self._queue.empty():
+                keep_awake(False)
 
     def run_now(self, job_id: str) -> Job:
         with self._lock:

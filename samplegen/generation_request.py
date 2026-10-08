@@ -53,6 +53,10 @@ class GenerationRequest:
     style_strength: float = 1.0
     # SFX / Free: make the take loop seamlessly (ambiences, drones, textures)
     seamless: bool = False
+    # Name for the results instead of one made from the prompt (variations keep their original's)
+    title: str | None = None
+    # Tags put on every result (a batch's shot-list name, for instance)
+    tags: tuple[str, ...] = ()
 
     @property
     def is_loop(self) -> bool:
@@ -169,6 +173,8 @@ class GenerationRequest:
 
 
 def sample_name(request: GenerationRequest, source_name: str | None = None) -> str:
+    if request.title and request.title.strip():
+        return re.sub(r"\s+", " ", request.title).strip()[:120]
     if request.uses_source:
         base = source_name or "source"
         if request.mode == "transform":

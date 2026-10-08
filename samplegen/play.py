@@ -14,6 +14,7 @@ from .library import Library, SampleRecord
 
 SAMPLE_NOTE = re.compile(r"_([A-G]s?-?\d)$")  # file name suffix: C4, Cs4, ...
 MAX_INSTRUMENTS = 500
+PLAYABLE = ("instrument", "kit")  # kits play on their drum keys only (no repitching)
 
 
 @dataclass(frozen=True)
@@ -22,10 +23,11 @@ class InstrumentInfo:
     name: str
     folder: Path
     notes: dict[int, Path]  # midi -> sample file
+    kind: str = "instrument"  # or "kit"
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "low": min(self.notes, default=None),
-                "high": max(self.notes, default=None), "count": len(self.notes)}
+                "high": max(self.notes, default=None), "count": len(self.notes), "kind": self.kind}
 
 
 def note_of(sample: Path) -> int | None:
@@ -51,20 +53,21 @@ def instrument_notes(folder: Path) -> dict[int, Path]:
 
 def instrument_info(library: Library, record: SampleRecord) -> InstrumentInfo | None:
     rel = record.params.get("instrument_folder")
-    if record.mode != "instrument" or not rel:
+    if record.mode not in PLAYABLE or not rel:
         return None
     folder = (library.root / rel).resolve()
     if not folder.is_relative_to(library.root.resolve()) or not folder.is_dir():
         return None  # moved/deleted outside samplegen, or a path that doesn't belong to the library
     notes = instrument_notes(folder)
-    return InstrumentInfo(record.id, record.name, folder, notes) if notes else None
+    return InstrumentInfo(record.id, record.name, folder, notes, record.mode) if notes else None
 
 
 def list_instruments(library: Library) -> list[InstrumentInfo]:
     found = []
     for status in ("new", "kept"):
-        for record in library.list(status=status, mode="instrument", limit=MAX_INSTRUMENTS):
-            info = instrument_info(library, record)
-            if info:
-                found.append(info)
+        for mode in PLAYABLE:
+            for record in library.list(status=status, mode=mode, limit=MAX_INSTRUMENTS):
+                info = instrument_info(library, record)
+                if info:
+                    found.append(info)
     return found

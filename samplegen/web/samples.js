@@ -35,6 +35,8 @@ function describe(record) {
   let base;
   if (record.mode === "loop") base = `${p.bpm} BPM · ${p.key} · ${p.bars} bars · seed ${record.seed}`;
   else if (record.mode === "instrument") base = `instrument · ${p.low_note}–${p.high_note} · ${p.notes} notes · ⤴ opens it`;
+  else if (record.mode === "kit") base = `drum kit · ${p.pieces} pieces · ${p.round_robins} takes each · ⤴ opens it`;
+  else if (record.mode === "layered") base = `layered hit · take ${p.take} · ${formatSeconds(record.duration)}`;
   else if (record.mode === "stems") base = `${p.stem} stem · ${formatSeconds(record.duration)}`;
   else if (record.mode === "performance" || record.mode === "recovered") base = `${record.prompt} · ${formatSeconds(record.duration)}`;
   else base = `${formatSeconds(record.duration)} · seed ${record.seed}`;
@@ -163,10 +165,11 @@ export function createSampleRow(record, { onChange } = {}) {
   const editBtn = iconButton("edit", "Rename / tags (E)", "edit");
   const midiBtn = iconButton("midi", "Extract MIDI notes (M)", "midi");
   const similarBtn = iconButton("similar", "Find sounds like this one (L)", "similar");
+  const variationsBtn = iconButton("spark", "Make 4 more like this one (V)", "variations");
   midiBtn.draggable = true;
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.append(favBtn, keepBtn, trashBtn, editBtn, sourceBtn, stemsBtn, midiBtn, similarBtn, revealBtn);
+  actions.append(favBtn, keepBtn, trashBtn, editBtn, variationsBtn, sourceBtn, stemsBtn, midiBtn, similarBtn, revealBtn);
   el.append(playBtn, canvas, info, actions);
 
   const row = { el, record, canvas, duration: null, loading: false };
@@ -179,8 +182,9 @@ export function createSampleRow(record, { onChange } = {}) {
     title.textContent = r.name;
     title.title = r.prompt;
     meta.textContent = describe(r);
-    stemsBtn.hidden = r.mode === "instrument";
-    midiBtn.hidden = r.mode === "instrument"; // instruments already are notes
+    midiBtn.hidden = r.mode === "instrument" || r.mode === "kit"; // instruments already are notes
+    variationsBtn.hidden = r.mode === "instrument" || r.mode === "kit";
+    stemsBtn.hidden = r.mode === "instrument" || r.mode === "kit";
     el.classList.toggle("kept", r.status === "kept");
     el.classList.toggle("trashed", r.status === "trashed");
     el.classList.toggle("favorite", r.favorite);
@@ -212,8 +216,10 @@ export function createSampleRow(record, { onChange } = {}) {
     edit: () => openEditor(row, (updated) => update(Promise.resolve(updated))),
     midi: () => extractMidi(row, midiBtn),
     similar: () => emit("samplegen:similar"),
+    variations: () => { if (!["instrument", "kit"].includes(row.record.mode)) emit("samplegen:variations"); },
   };
   el.sampleActions = actionsApi;
+  variationsBtn.addEventListener("click", actionsApi.variations);
   similarBtn.addEventListener("click", actionsApi.similar);
   midiBtn.addEventListener("click", actionsApi.midi);
   midiBtn.addEventListener("dragstart", (e) => {

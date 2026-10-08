@@ -50,7 +50,8 @@ def add_play_routes(app: FastAPI, ctx) -> None:
     @app.get("/api/instruments/{instrument_id}")
     def instrument(instrument_id: str):
         info = instrument_or_404(instrument_id)
-        loops = ensure_loops(info.folder, info.notes)  # first open of an older instrument: computed now
+        # first open of an older instrument: loops computed now (drum hits are never looped)
+        loops = {} if info.kind == "kit" else ensure_loops(info.folder, info.notes)
         notes = [{"midi": m, "url": f"/api/instruments/{instrument_id}/notes/{m}", "loop": loops.get(m)}
                  for m in sorted(info.notes)]
         return {**info.to_dict(), "notes": notes}

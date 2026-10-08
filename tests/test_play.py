@@ -71,7 +71,7 @@ def test_instruments_are_listed_with_their_range(env):
     record = make_instrument(library, tmp_path)
     assert [i.id for i in list_instruments(library)] == [record.id]
     listed = client.get("/api/instruments").json()
-    assert listed == [{"id": record.id, "name": "Glass Keys", "low": 60, "high": 64, "count": 3}]
+    assert listed == [{"id": record.id, "name": "Glass Keys", "low": 60, "high": 64, "count": 3, "kind": "instrument"}]
     detail = client.get(f"/api/instruments/{record.id}").json()
     assert [n["midi"] for n in detail["notes"]] == [60, 61, 64]
     note = client.get(detail["notes"][1]["url"])

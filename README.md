@@ -52,6 +52,14 @@ On any sample: **Split into stems** (`S`, Demucs htdemucs_ft), **rename / tags**
   the computer keys (`A`–`K`, `Z`/`X` octave) or the screen. Held notes sustain (each note gets a crossfaded sustain
   loop, also written into the Decent Sampler / SFZ presets). Record takes, **hum a melody** and hear it on the
   instrument, drop a `.mid` (or a sample's ♪), export MIDI, save takes to the library.
+- **Shot list** (button under Generate): one sound per line (`door creak x8`, `footsteps on gravel | 12x | 3s`,
+  `thunder | 20s | medium | loop`); samplegen queues them all, tags the results with the list's name, keeps the PC
+  awake until it's done, and can export everything as a loudness-matched, round-robin pack at the end.
+- **More like this** (`V` on any sample): 4 gentle variations of it, same name and tags (they export as round robins).
+- **Drum kit** mode: one style prompt → 12 pieces (General MIDI map) × 1–4 round robins, open hat choked by the closed
+  hat; Decent Sampler + SFZ in `Kits\<name>\`, playable in the Play tab.
+- **Layers** mode: an impact from a **transient**, a **body** and a **tail**, each generated on its own, lined up on
+  their first transient, offset and balanced; saves the blended hit and the three layers.
 - **Make it a loop** (Play): **Melody → new sound** snaps a take to the beat, fits it to 4/8 bars at a Foundation-1
   tempo, renders it as a seamless loop and opens Transform with it (Foundation-1, loop kept seamless): describe a
   sound and the AI plays your melody with it. **Loops in this key & tempo** detects the take's key

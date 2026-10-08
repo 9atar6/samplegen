@@ -21,6 +21,8 @@ from .instruments import (
     INSTRUMENT_DIR, InstrumentRequest, chunk_notes, chunk_seconds, keybed_prompt, normalize_together,
     preview_run, slice_chunk, write_instrument,
 )
+from .kits import KITS_DIR, PIECES, KitRequest, kit_preview, write_kit
+from .layers import LAYERS, LayerRequest, blend, prepare_layer
 from .library import Library, NewSample, SampleRecord, slugify
 from .packs import clean_pack_name, free_folder
 from .sources import NATIVE, SourceStore
@@ -102,6 +104,10 @@ class Generator:
             return self._run_stems(request, job_id)
         if isinstance(request, InstrumentRequest):
             return self._run_instrument(request, job_id)
+        if isinstance(request, KitRequest):
+            return self._run_kit(request, job_id)
+        if isinstance(request, LayerRequest):
+            return self._run_layers(request, job_id)
         self.check(request)
         seed = request.seed if request.seed is not None else random.randint(0, MAX_SEED)
         prepared = self._prepare(request, seed, job_id)
@@ -174,6 +180,98 @@ class Generator:
             params=params, duration=len(preview) / sample_rate, sample_rate=request.export.sample_rate,
             batch_id=uuid.uuid4().hex[:8], name=title,
         ))]
+
+    # ---------- drum kits ----------
+
+    def _run_kit(self, request: KitRequest, job_id: str) -> list[SampleRecord]:
+        self.check(request)
+        spec = MODELS[request.model]
+        seed = request.seed if request.seed is not None else random.randint(0, MAX_SEED)
+        self.engine.ensure_running()
+        # Every piece queued up front (one job per piece, its round robins as a batch), then collected.
+        queued = []
+        for index, piece in enumerate(PIECES):
+            plan = plan_generation(piece.seconds, SAMPLE_RATE)
+            graph = build_text_to_audio(spec, request.piece_prompt(piece), "music, melody, voice", plan,
+                                        (seed + index) % (MAX_SEED + 1), request.round_robins, f"{job_id}k{index:02d}")
+            queued.append((piece, plan, self.client.submit(graph)))
+
+        takes: dict[str, list[np.ndarray]] = {}
+        for piece, plan, prompt_id in queued:
+            outputs = self.client.wait(prompt_id, timeout=self.timeout)
+            options = PostOptions(target_samples=plan.target_samples, is_loop=False, normalize_db=-1.0,
+                                  trim_silence=True, fade_in_ms=0.0, fade_out_ms=30.0)
+            for output in outputs:
+                raw_path = self._raw_output_path(output)
+                raw, sr = read_engine_wav(raw_path)
+                raw_path.unlink(missing_ok=True)
+                takes.setdefault(piece.key, []).append(postprocess(raw, sr, options))
+        if not takes:
+            raise EngineError("The engine returned no audio for the kit.")
+
+        title = request.title()
+        folder = free_folder(self.library.root / KITS_DIR, clean_pack_name(title))
+        write_kit(folder, title, slugify(title) or "kit", takes, SAMPLE_RATE, request.export)
+        self.staging_dir.mkdir(parents=True, exist_ok=True)
+        staged = self.staging_dir / f"{job_id}_kit.wav"
+        preview = kit_preview(takes, SAMPLE_RATE)
+        write_wav(staged, preview, SAMPLE_RATE, request.export, title=title,
+                  comment=f"samplegen | drum kit | {request.prompt}"[:1000])
+        params = {"instrument_folder": folder.relative_to(self.library.root).as_posix(), "pieces": len(takes),
+                  "round_robins": request.round_robins, "duration": len(preview) / SAMPLE_RATE}
+        return [self.library.add(staged, NewSample(
+            mode="kit", model=request.model, prompt=request.prompt.strip(), negative_prompt="", seed=seed,
+            params=params, duration=len(preview) / SAMPLE_RATE, sample_rate=request.export.sample_rate,
+            batch_id=uuid.uuid4().hex[:8], name=title,
+        ))]
+
+    # ---------- layer designer ----------
+
+    def _run_layers(self, request: LayerRequest, job_id: str) -> list[SampleRecord]:
+        self.check(request)
+        spec = MODELS[request.model]
+        seed = request.seed if request.seed is not None else random.randint(0, MAX_SEED)
+        self.engine.ensure_running()
+        queued = []
+        for index, layer in enumerate(request.active()):
+            plan = plan_generation(request.seconds(layer), SAMPLE_RATE)
+            graph = build_text_to_audio(spec, request.layer_prompt(layer), "music, melody, voice", plan,
+                                        (seed + index) % (MAX_SEED + 1), request.variations, f"{job_id}l{index}")
+            queued.append((layer, self.client.submit(graph)))
+        takes: dict[str, list[np.ndarray]] = {}
+        for layer, prompt_id in queued:
+            for output in self.client.wait(prompt_id, timeout=self.timeout):
+                raw_path = self._raw_output_path(output)
+                raw, sr = read_engine_wav(raw_path)
+                raw_path.unlink(missing_ok=True)
+                takes.setdefault(layer, []).append(prepare_layer(raw, layer, request.seconds(layer), sr))
+
+        title = request.title()
+        self.staging_dir.mkdir(parents=True, exist_ok=True)
+        records = []
+        count = min((len(t) for t in takes.values()), default=0)
+        for i in range(count):
+            batch_id = uuid.uuid4().hex[:8]  # one hit and its layers belong together
+            layers = {layer: takes[layer][i] for layer in takes}
+            base_params = {"character": request.character, "take": i + 1,
+                           "prompts": {layer: request.layer_prompt(layer) for layer in layers},
+                           "offsets_ms": {"body": request.body_offset_ms, "tail": request.tail_offset_ms},
+                           "gains_db": dict(zip(LAYERS, request.gains_db))}
+            for name, audio, mode in [(title, blend(layers, request, SAMPLE_RATE), "layered"),
+                                      *((f"{title} · {layer}", normalize_peak(a, -1.0), "layer")
+                                        for layer, a in layers.items())]:
+                staged = self.staging_dir / f"{job_id}_{i}_{slugify(name) or 'layer'}.wav"
+                write_wav(staged, audio, SAMPLE_RATE, request.export, title=name,
+                          comment=f"samplegen | layered | {request.full_prompt()}"[:1000])
+                records.append(self.library.add(staged, NewSample(
+                    mode=mode, model=request.model, prompt=request.full_prompt()[:2000], negative_prompt="",
+                    seed=seed, params={**base_params, "duration": len(audio) / SAMPLE_RATE},
+                    duration=len(audio) / SAMPLE_RATE, sample_rate=request.export.sample_rate,
+                    batch_id=batch_id, name=name,
+                )))
+        if not records:
+            raise EngineError("The engine returned no audio for the layers.")
+        return records
 
     # ---------- stems ----------
 
@@ -315,8 +413,9 @@ class Generator:
             "export": {"sample_rate": request.export.sample_rate, "bit_depth": request.export.bit_depth},
             **prepared.params,
         }
-        return self.library.add(staged, NewSample(
+        record = self.library.add(staged, NewSample(
             mode=request.mode, model=request.model, prompt=request.prompt.strip(),
             negative_prompt=request.negative_prompt.strip(), seed=seed, params=params,
             duration=len(audio) / sr, sample_rate=request.export.sample_rate, batch_id=batch_id, name=name,
         ))
+        return self.library.set_tags(record.id, request.tags) if request.tags else record

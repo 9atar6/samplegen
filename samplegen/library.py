@@ -27,6 +27,7 @@ STATUSES = ("new", "kept", "trashed")
 KEPT_FOLDERS = {
     "sfx": "SFX", "loop": "Loops", "free": "Music", "transform": "Transformed", "edit": "Edited",
     "stems": "Stems", "instrument": "Instruments", "performance": "Performances", "recovered": "Recovered",
+    "kit": "Kits", "layered": "Layered", "layer": "Layered",
 }
 SIDECARS = (".mid",)  # files that belong to a sample and move with it
 MAX_SLUG_LENGTH = 60

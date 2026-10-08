@@ -2,7 +2,6 @@
 // shaped by velocity and a release envelope. Also renders a take offline to a WAV-ready buffer.
 
 const MIN_GAIN = 0.0001;
-
 function velocityGain(vel) {
   return Math.pow(0.12 + 0.88 * Math.max(0, Math.min(1, vel)), 2); // soft notes stay audible
 }
@@ -45,6 +44,7 @@ export class Sampler {
     }));
     this.samples = samples;
     this.loops = loops;
+    this.exact = detail.kind === "kit"; // a drum kit plays its own keys only: no repitched snares
     this.roots = [...samples.keys()].sort((a, b) => a - b);
     this.instrument = detail;
   }
@@ -61,6 +61,7 @@ export class Sampler {
 
   // One note, on any context (live or offline). Returns a voice to release later.
   voice(ctx, destination, midi, vel, when) {
+    if (this.exact && !this.samples.has(midi)) return null;
     const root = this.nearest(midi);
     const src = ctx.createBufferSource();
     src.buffer = this.samples.get(root);
@@ -78,7 +79,9 @@ export class Sampler {
     return { src, gain };
   }
 
-  stopVoice(voice, when, release = this.release) {
+  // `force`: stop even a drum hit (retrigger, Stop); otherwise kit hits ring out like one-shots.
+  stopVoice(voice, when, release = this.release, force = false) {
+    if (!voice || (this.exact && !force)) return;
     voice.gain.gain.cancelScheduledValues(when);
     voice.gain.gain.setTargetAtTime(MIN_GAIN, when, Math.max(0.01, release / 4));
     try { voice.src.stop(when + release * 1.5 + 0.05); } catch { /* already stopped */ }
@@ -88,7 +91,7 @@ export class Sampler {
     if (!this.ready) return;
     if (this.ctx.state === "suspended") this.ctx.resume();
     const old = this.voices.get(midi);
-    if (old) this.stopVoice(old, this.ctx.currentTime, 0.03); // retrigger: quick fade, no click
+    if (old) this.stopVoice(old, this.ctx.currentTime, 0.03, true); // retrigger: quick fade, no click
     this.sustained.delete(midi);
     this.voices.set(midi, this.voice(this.ctx, this.output, midi, vel, this.ctx.currentTime));
   }
@@ -112,7 +115,7 @@ export class Sampler {
   }
 
   allOff() {
-    for (const voice of this.voices.values()) this.stopVoice(voice, this.ctx.currentTime, 0.05);
+    for (const voice of this.voices.values()) this.stopVoice(voice, this.ctx.currentTime, 0.05, true);
     this.voices.clear();
     this.sustained.clear();
   }
@@ -135,7 +138,7 @@ export class Sampler {
       stop: () => {
         clearTimeout(endTimer);
         timers.forEach(clearTimeout);
-        for (const v of voices) this.stopVoice(v, this.ctx.currentTime, 0.05);
+        for (const v of voices) this.stopVoice(v, this.ctx.currentTime, 0.05, true);
         finish();
       },
     };

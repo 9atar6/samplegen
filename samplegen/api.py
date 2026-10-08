@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .api_extras import add_extra_routes, open_in_explorer
+from .api_create import add_create_routes
 from .api_play import add_play_routes
 from .api_search import add_search_routes
 from .api_training import add_training_routes
@@ -182,7 +183,10 @@ def create_app(ctx: AppContext) -> FastAPI:
         return job.to_dict()
 
     @app.get("/api/jobs")
-    def jobs():
+    def jobs(ids: str = Query("", max_length=20_000)):
+        if ids:  # a batch following its own jobs
+            wanted = [i for i in ids.split(",") if i][:1000]
+            return [job.to_dict() for job in (ctx.jobs.get(i) for i in wanted) if job is not None]
         return [j.to_dict() for j in ctx.jobs.recent()[:30]]
 
     @app.get("/api/jobs/{job_id}")
@@ -234,7 +238,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     def reveal(sample_id: str):
         record = sample_or_404(sample_id)
         folder = record.params.get("instrument_folder")
-        if record.mode == "instrument" and folder:
+        if record.mode in ("instrument", "kit") and folder:
             open_in_explorer(ctx.library.root / folder)  # the playable instrument, not just its preview
         else:
             open_in_explorer(ctx.library.path_of(record), select=True)
@@ -243,6 +247,7 @@ def create_app(ctx: AppContext) -> FastAPI:
     add_training_routes(app, ctx)
     add_play_routes(app, ctx)
     add_search_routes(app, ctx)
+    add_create_routes(app, ctx)
 
     # ---------- sources (Transform / Edit) ----------
 

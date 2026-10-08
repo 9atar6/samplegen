@@ -1,6 +1,7 @@
 // samplegen UI bootstrap: generate form, modes, keyboard, engine status.
 
 import { api } from "./api.js";
+import { initBatch } from "./batch.js";
 import { initFeed, track } from "./feed.js";
 import { icon } from "./icons.js";
 import { initLibrary, setSimilar, showLibrary } from "./library.js";
@@ -25,6 +26,8 @@ const PROMPT_COPY = {
   transform: ["What should it become?", "rusty metal, industrial, resonant clank"],
   edit: ["What goes in the new part?", "glass shattering, bright debris"],
   instrument: ["Describe the instrument (instrument + timbre tags)", "Grand Piano, Warm, Gritty"],
+  kit: ["The kit's style", "dusty 90s boom bap, vinyl crackle, warm and punchy"],
+  layers: ["Character shared by every layer", "sci-fi, huge, metallic"],
 };
 
 const STYLE_MODES = ["sfx", "free"];
@@ -155,12 +158,17 @@ function setMode(mode, preferredModel) {
 
   const usesSource = SOURCE_MODES.includes(mode);
   const isInstrument = mode === "instrument";
+  const isKit = mode === "kit";
+  const isLayers = mode === "layers";
   $("#loop-fields").hidden = mode !== "loop";
   $("#instrument-fields").hidden = !isInstrument;
-  $("#duration-field").hidden = mode === "loop" || usesSource || isInstrument;
-  $("#variations-field").hidden = isInstrument;
-  $("#shape-section").hidden = isInstrument;
-  $("#trim-field").hidden = mode === "loop" || usesSource || isInstrument;
+  $("#kit-fields").hidden = !isKit;
+  $("#layer-fields").hidden = !isLayers;
+  $("#duration-field").hidden = mode === "loop" || usesSource || isInstrument || isKit || isLayers;
+  $("#variations-field").hidden = isInstrument || isKit;
+  $("#variations").max = isLayers ? "4" : "8"; // each layered take is four files
+  $("#shape-section").hidden = isInstrument || isKit;
+  $("#trim-field").hidden = mode === "loop" || usesSource || isInstrument || isKit || isLayers;
   $("#seamless-field").hidden = !SEAMLESS_MODES.includes(mode);
   $("#source-panel").hidden = !usesSource;
   $("#transform-fields").hidden = mode !== "transform";
@@ -231,6 +239,11 @@ function onModelChange() {
 }
 
 function updateOutputs() {
+  $("#kit-rr-out").textContent = $("#kit-rr").value;
+  for (const i of [0, 1, 2]) {
+    const db = Number($(`#layer-g${i}`).value);
+    $(`#layer-g${i}-out`).textContent = `${db > 0 ? "+" : ""}${db} dB`;
+  }
   const seconds = Number($("#duration").value);
   $("#duration-out").textContent = seconds >= 60
     ? `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")} min`
@@ -329,6 +342,15 @@ function readForm() {
     style: STYLE_MODES.includes(state.mode) && $("#style").value ? $("#style").value : null,
     style_strength: Number($("#style-strength").value),
     seamless: SEAMLESS_MODES.includes(state.mode) && $("#seamless").checked,
+    kit_name: $("#kit-name").value,
+    kit_rr: Number($("#kit-rr").value),
+    layers: {
+      transient: $("#layer-transient").value, body: $("#layer-body").value, tail: $("#layer-tail").value,
+      gains_db: [0, 1, 2].map((i) => Number($(`#layer-g${i}`).value)),
+      body_offset_ms: Number($("#layer-body-offset").value) || 0,
+      tail_offset_ms: Number($("#layer-tail-offset").value) || 0,
+      tail_seconds: Number($("#layer-tail-seconds").value) || 4,
+    },
   };
 }
 
@@ -359,6 +381,17 @@ function applyForm(saved) {
   if (saved.normalize_db !== null && saved.normalize_db !== undefined) set("#normalize-db", saved.normalize_db);
   $("#trim").checked = saved.trim_silence !== false;
   $("#seamless").checked = Boolean(saved.seamless);
+  set("#kit-name", saved.kit_name);
+  set("#kit-rr", saved.kit_rr);
+  if (saved.layers) {
+    set("#layer-transient", saved.layers.transient);
+    set("#layer-body", saved.layers.body);
+    set("#layer-tail", saved.layers.tail);
+    (saved.layers.gains_db || []).forEach((g, i) => set(`#layer-g${i}`, g));
+    set("#layer-body-offset", saved.layers.body_offset_ms);
+    set("#layer-tail-offset", saved.layers.tail_offset_ms);
+    set("#layer-tail-seconds", saved.layers.tail_seconds);
+  }
   set("#style-strength", saved.style_strength);
   state.savedStyle = saved.style;
   setScale(saved.scale || "minor");
@@ -383,12 +416,21 @@ async function submit(body) {
   showFormError("");
   let job;
   try {
-    job = body.mode === "instrument"
-      ? await api.instrument({
+    if (body.mode === "instrument") {
+      job = await api.instrument({
         prompt: body.prompt, name: body.instrument_name, low_note: body.low_note, high_note: body.high_note,
         space: body.space, seed: body.seed, export: body.export,
-      })
-      : await api.generate(body);
+      });
+    } else if (body.mode === "kit") {
+      job = await api.kit({ prompt: body.prompt, name: body.kit_name, round_robins: body.kit_rr, seed: body.seed, export: body.export });
+    } else if (body.mode === "layers") {
+      job = await api.layers({
+        character: body.prompt, ...body.layers, model: body.model, seed: body.seed, export: body.export,
+        variations: Math.min(4, body.variations),
+      });
+    } else {
+      job = await api.generate(body);
+    }
   } catch (err) {
     showFormError(err.message);
     return;
@@ -407,6 +449,23 @@ async function useSampleAsSource(record) {
     toast(`“${record.name}” loaded as the source`, "ok");
   } catch (err) {
     showFormError(err.message);
+  }
+}
+
+// "More like this one" on any sample: a gentle Transform of it, same name and tags.
+const varying = new Set();
+async function makeVariations(record) {
+  if (varying.has(record.id)) return;
+  varying.add(record.id);
+  try {
+    const job = await api.variations(record.id, { count: 4 });
+    showView("generate");
+    track(job, () => makeVariations(record));
+    toast(`Making 4 more like “${record.name}”…`);
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    varying.delete(record.id);
   }
 }
 
@@ -487,7 +546,7 @@ function moveFocus(delta) {
   next.scrollIntoView({ block: "nearest" });
 }
 
-const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit", m: "midi", l: "similar" };
+const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit", m: "midi", l: "similar", v: "variations" };
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -573,6 +632,7 @@ async function init() {
   document.addEventListener("samplegen:stems", (e) => splitStems(e.detail));
   document.addEventListener("samplegen:similar", (e) => { setSimilar(e.detail); showView("library"); });
   document.addEventListener("samplegen:loop-settings", (e) => applyLoopSettings(e.detail));
+  document.addEventListener("samplegen:variations", (e) => makeVariations(e.detail));
   document.addEventListener("samplegen:melody-source", (e) => applyMelodySource(e.detail));
   document.addEventListener("samplegen:styles", (e) => {
     setStyles(e.detail, state.savedStyle);
@@ -590,6 +650,7 @@ async function init() {
   });
   initTrain();
   initPlay();
+  initBatch();
   for (const chip of document.querySelectorAll("#try-prompts .chip")) {
     chip.addEventListener("click", () => {
       if (state.mode !== "sfx") setMode("sfx");
