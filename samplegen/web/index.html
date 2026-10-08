@@ -112,6 +112,13 @@
                 <textarea id="prompt" rows="4" maxlength="2000" placeholder="heavy metal door slam in a concrete hallway, long reverb tail"></textarea>
               </div>
             </label>
+            <div class="explore-ideas" id="explore-ideas" hidden>
+              <div class="explore-head">
+                <small class="hint">Ideas being made: click the one you like to keep refining it.</small>
+                <button type="button" class="icon" id="explore-close" title="Hide ideas" aria-label="Hide ideas"><span data-icon="x"></span></button>
+              </div>
+              <div class="chips" id="explore-list"></div>
+            </div>
 
             <div id="loop-fields" hidden>
               <div class="row3">
@@ -228,6 +235,7 @@
         <div class="deck-foot">
           <p class="form-error" id="form-error" role="alert" hidden></p>
           <button type="submit" class="primary" id="generate-btn"><span data-icon="spark"></span><span>Generate</span><kbd>Ctrl ↵</kbd></button>
+          <button type="button" class="ghost explore-btn" id="explore-btn" title="Type a word or two (or nothing): samplegen writes 4 different prompts and makes one take of each, so you can pick by ear"><span data-icon="shuffle"></span><span>Explore 4 ideas</span><kbd>Ctrl ⇧ ↵</kbd></button>
           <button type="button" class="ghost batch-open" id="batch-open" title="Write a list of sounds and let samplegen make them all (overnight, if you like)"><span data-icon="tag"></span><span>Shot list…</span></button>
         </div>
       </form>

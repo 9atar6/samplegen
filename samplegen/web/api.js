@@ -51,6 +51,8 @@ export const api = {
   kit: (body) => request("/api/kits", { method: "POST", body }),
   layers: (body) => request("/api/layers", { method: "POST", body }),
   variations: (id, body = {}) => request(`/api/samples/${id}/variations`, { method: "POST", body }),
+  explore: (body) => request("/api/prompts/explore", { method: "POST", body }),
+  nudges: () => request("/api/prompts/nudges"),
   previewBatch: (body) => request("/api/batches/preview", { method: "POST", body }),
   startBatch: (body) => request("/api/batches", { method: "POST", body }),
   searchSound: (q) => request(`/api/search?${new URLSearchParams({ q })}`),

@@ -87,6 +87,59 @@ def test_batch_queues_everything_and_tags_the_results(env):
     assert len(api.get("/api/jobs", params={"ids": ids_param}).json()) == len(batch["jobs"])
 
 
+def test_a_nudge_remakes_the_take_pushed_one_way(env):
+    api, jobs, library, _ = env
+    first = api.post("/api/generate", json={"mode": "sfx", "model": "sa3-sfx", "prompt": "bright glass hit, long reverb",
+                                            "duration": 1.0, "variations": 1}).json()
+    original = library.get(jobs.run_now(first["id"]).sample_ids[0])
+    library.set_tags(original.id, ["glass"])
+    job = api.post(f"/api/samples/{original.id}/variations", json={"count": 2, "nudge": "darker"}).json()
+    done = jobs.run_now(job["id"])
+    assert done.state == "done", done.error
+    takes = [library.get(i) for i in done.sample_ids]
+    assert len(takes) == 2
+    for take in takes:
+        assert take.prompt == "glass hit, long reverb, dark, warm, muffled"
+        assert take.name == f"{original.name} darker" and take.tags == ("glass",)
+
+
+def test_a_nudged_loop_stays_in_foundation_tags(env):
+    api, jobs, library, _ = env
+    first = api.post("/api/generate", json={"mode": "loop", "model": "f1-samples", "prompt": "Synth Lead, Bright",
+                                            "bpm": 128, "bars": 4, "key": "A", "scale": "minor",
+                                            "variations": 1}).json()
+    original = library.get(jobs.run_now(first["id"]).sample_ids[0])
+    job = api.post(f"/api/samples/{original.id}/variations", json={"count": 1, "nudge": "darker"}).json()
+    done = jobs.run_now(job["id"])
+    assert done.state == "done", done.error
+    take = library.get(done.sample_ids[0])
+    assert take.prompt == "Synth Lead, Dark, Warm, 4 Bars, 128 BPM, A minor"
+
+
+def test_an_unknown_nudge_is_refused(env):
+    api, jobs, library, _ = env
+    first = api.post("/api/generate", json={"mode": "sfx", "model": "sa3-sfx", "prompt": "glass hit",
+                                            "duration": 1.0, "variations": 1}).json()
+    original = library.get(jobs.run_now(first["id"]).sample_ids[0])
+    res = api.post(f"/api/samples/{original.id}/variations", json={"nudge": "louder"})
+    assert res.status_code == 422
+
+
+def test_explore_suggests_prompts(env):
+    api, *_ = env
+    res = api.post("/api/prompts/explore", json={"sketch": "door", "mode": "sfx"})
+    assert res.status_code == 200
+    prompts = res.json()["prompts"]
+    assert len(prompts) == 4 and all("door" in p for p in prompts)
+    assert api.post("/api/prompts/explore", json={"sketch": "piano", "mode": "instrument"}).status_code == 422
+
+
+def test_nudges_are_listed_for_the_ui(env):
+    api, *_ = env
+    nudges = api.get("/api/prompts/nudges").json()
+    assert {"key": "darker", "label": "Darker"} in nudges
+
+
 def test_variations_keep_the_original_name_and_tags(env):
     api, jobs, library, _ = env
     first = api.post("/api/generate", json={"mode": "sfx", "model": "sa3-sfx", "prompt": "glass hit",

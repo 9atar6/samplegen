@@ -9,11 +9,27 @@ from .catalog import MODELS
 from .kits import MAX_ROUND_ROBINS, KitRequest
 from .layers import LayerRequest
 from .library import SampleNotFound
+from .prompting import MAX_SKETCH_CHARS, NUDGES, explore
+
+
+VARIATION_STRENGTH = 0.35  # "more like this": gentle
+NUDGE_STRENGTH = 0.5       # "darker": enough to hear the change, still the same take
 
 
 class VariationsIn(BaseModel):
     count: int = Field(4, ge=1, le=8)
-    strength: float = Field(0.35, ge=0.05, le=1.0)
+    strength: float | None = Field(None, ge=0.05, le=1.0)
+    nudge: str | None = None
+
+    def resolved_strength(self) -> float:
+        if self.strength is not None:
+            return self.strength
+        return NUDGE_STRENGTH if self.nudge else VARIATION_STRENGTH
+
+
+class ExploreIn(BaseModel):
+    sketch: str = Field("", max_length=MAX_SKETCH_CHARS)
+    mode: str = "sfx"
 
 
 class BatchIn(BaseModel):
@@ -76,15 +92,30 @@ def add_create_routes(app: FastAPI, ctx) -> None:
             raise HTTPException(404, "Sample not found") from None
         if record.mode in ("instrument", "kit"):
             raise HTTPException(422, "Instruments and kits are made of many notes: generate a new one instead.")
+        if body.nudge is not None and body.nudge not in NUDGES:
+            raise HTTPException(422, f"Unknown tweak “{body.nudge}”.")
         path = ctx.library.path_of(record)
         if not path.exists():
             raise HTTPException(410, "The file was moved or deleted outside samplegen")
         looping = record.mode == "loop" or bool(record.params.get("loop"))
         source = ctx.sources.import_file(path, record.name[:80], is_loop=looping)
         try:
-            return ctx.jobs.submit(variation_request(record, source.id, body.count, body.strength)).to_dict()
+            request = variation_request(record, source.id, body.count, body.resolved_strength(), body.nudge)
+            return ctx.jobs.submit(request).to_dict()
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+
+    @app.post("/api/prompts/explore")
+    def explore_prompts(body: ExploreIn):
+        """A few words -> contrasting full prompts, one per take, to choose from by ear."""
+        try:
+            return {"prompts": explore(body.sketch, body.mode)}
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/api/prompts/nudges")
+    def list_nudges():
+        return [{"key": key, "label": nudge.label} for key, nudge in NUDGES.items()]
 
     @app.post("/api/batches/preview")
     def preview_batch(body: BatchIn):

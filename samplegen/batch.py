@@ -12,9 +12,10 @@ import re
 from dataclasses import dataclass, replace
 
 from .audio import ExportFormat
-from .catalog import MODELS
+from .catalog import MODELS, build_loop_prompt
 from .generation_request import MAX_BATCH_AUDIO_SECONDS, MAX_VARIATIONS, GenerationRequest
 from .library import SampleRecord, clean_tags
+from .prompting import NUDGES, nudge_prompt
 
 MAX_LINES = 200
 MAX_SOUNDS = 1000
@@ -94,15 +95,38 @@ def shot_requests(shots: list[Shot], tag: str, default_model: str = "sa3-sfx", d
     return requests
 
 
-def variation_request(record: SampleRecord, source_id: str, count: int, strength: float) -> GenerationRequest:
+def variation_request(record: SampleRecord, source_id: str, count: int, strength: float,
+                      nudge: str | None = None) -> GenerationRequest:
     """More takes like `record`: a gentle Transform of it, keeping its name (so the takes
-    export as round robins of it) and its tags."""
+    export as round robins of it) and its tags. With a `nudge` ("darker"...), the same take
+    pushed one way, named after it ("door slam darker")."""
     model = record.model if record.model in VARIATION_MODELS else ("sa3-medium" if record.duration > 30 else "sa3-sfx")
     prompt = (record.params.get("full_prompt") if model == "f1-samples" else None) or record.prompt or record.name
+    title = record.name
+    if nudge:
+        prompt = nudged_prompt(record, model, prompt, nudge)
+        base = record.name
+        for earlier in NUDGES.values():  # "door darker" nudged again is "door bigger", not "door darker bigger"
+            suffix = f" {earlier.label.lower()}"
+            if base.endswith(suffix):
+                base = base[:-len(suffix)]
+                break
+        title = f"{base} {NUDGES[nudge].label.lower()}"[:80]
     looping = record.mode == "loop" or bool(record.params.get("loop"))
     request = GenerationRequest(
         mode="transform", model=model, prompt=prompt, source_id=source_id, strength=strength,
-        variations=count, source_is_loop=looping, title=record.name, tags=record.tags,
+        variations=count, source_is_loop=looping, title=title, tags=record.tags,
         normalize_db=-1.0, fade_out_ms=0.0 if looping else 5.0,
     )
     return replace(request, variations=min(count, max(1, int(MAX_BATCH_AUDIO_SECONDS // max(record.duration, 0.5)))))
+
+
+def nudged_prompt(record: SampleRecord, model: str, prompt: str, nudge: str) -> str:
+    """Foundation-1 wants its tags before bars / BPM / key, so a loop's tags are nudged and
+    the musical part put back after them."""
+    params = record.params
+    key, _, scale = str(params.get("key") or "").partition(" ")
+    if model == "f1-samples" and params.get("bars") and params.get("bpm") and key and scale:
+        tags = nudge_prompt(record.prompt, nudge, tags=True)
+        return build_loop_prompt(tags, int(params["bars"]), int(params["bpm"]), key, scale)
+    return nudge_prompt(prompt, nudge, tags=model == "f1-samples")

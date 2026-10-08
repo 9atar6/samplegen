@@ -47,6 +47,41 @@ function isLooping(record) {
   return record.mode === "loop" || Boolean(record.params && (record.params.loop || (record.mode === "stems" && record.params.bpm)));
 }
 
+// Tweak: the take again, pushed one way. The choices come from the server (prompting.py).
+let nudgeList = null;
+async function openTweaks(row) {
+  const next = row.el.nextElementSibling;
+  if (next && next.classList.contains("sample-tweaks")) {
+    next.remove();
+    return;
+  }
+  try {
+    nudgeList ??= api.nudges();
+    const nudges = await nudgeList;
+    const strip = document.createElement("div");
+    strip.className = "sample-tweaks";
+    const label = document.createElement("small");
+    label.textContent = "Make it…";
+    strip.append(label, ...nudges.map(({ key, label: text }) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip";
+      chip.textContent = text;
+      chip.addEventListener("click", () => {
+        strip.remove();
+        document.dispatchEvent(new CustomEvent("samplegen:nudge", { detail: { record: row.record, nudge: key, label: text } }));
+      });
+      return chip;
+    }));
+    strip.addEventListener("keydown", (e) => { if (e.key === "Escape") { strip.remove(); row.el.focus(); } });
+    row.el.after(strip);
+    strip.querySelector(".chip")?.focus();
+  } catch (err) {
+    nudgeList = null;
+    toast(err.message, "error");
+  }
+}
+
 function openEditor(row, onSaved) {
   const next = row.el.nextElementSibling;
   if (next && next.classList.contains("sample-editor")) {
@@ -166,10 +201,11 @@ export function createSampleRow(record, { onChange } = {}) {
   const midiBtn = iconButton("midi", "Extract MIDI notes (M)", "midi");
   const similarBtn = iconButton("similar", "Find sounds like this one (L)", "similar");
   const variationsBtn = iconButton("spark", "Make 4 more like this one (V)", "variations");
+  const tweakBtn = iconButton("tune", "Tweak it: darker, bigger, drier… (N)", "tweak");
   midiBtn.draggable = true;
   const actions = document.createElement("div");
   actions.className = "actions";
-  actions.append(favBtn, keepBtn, trashBtn, editBtn, variationsBtn, sourceBtn, stemsBtn, midiBtn, similarBtn, revealBtn);
+  actions.append(favBtn, keepBtn, trashBtn, editBtn, variationsBtn, tweakBtn, sourceBtn, stemsBtn, midiBtn, similarBtn, revealBtn);
   el.append(playBtn, canvas, info, actions);
 
   const row = { el, record, canvas, duration: null, loading: false };
@@ -184,6 +220,7 @@ export function createSampleRow(record, { onChange } = {}) {
     meta.textContent = describe(r);
     midiBtn.hidden = r.mode === "instrument" || r.mode === "kit"; // instruments already are notes
     variationsBtn.hidden = r.mode === "instrument" || r.mode === "kit";
+    tweakBtn.hidden = r.mode === "instrument" || r.mode === "kit";
     stemsBtn.hidden = r.mode === "instrument" || r.mode === "kit";
     el.classList.toggle("kept", r.status === "kept");
     el.classList.toggle("trashed", r.status === "trashed");
@@ -217,9 +254,11 @@ export function createSampleRow(record, { onChange } = {}) {
     midi: () => extractMidi(row, midiBtn),
     similar: () => emit("samplegen:similar"),
     variations: () => { if (!["instrument", "kit"].includes(row.record.mode)) emit("samplegen:variations"); },
+    tweak: () => { if (!["instrument", "kit"].includes(row.record.mode)) openTweaks(row); },
   };
   el.sampleActions = actionsApi;
   variationsBtn.addEventListener("click", actionsApi.variations);
+  tweakBtn.addEventListener("click", actionsApi.tweak);
   similarBtn.addEventListener("click", actionsApi.similar);
   midiBtn.addEventListener("click", actionsApi.midi);
   midiBtn.addEventListener("dragstart", (e) => {

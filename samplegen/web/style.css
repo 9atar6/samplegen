@@ -238,6 +238,22 @@ main { position: relative; z-index: 1; flex: 1; min-height: 0; }
 .view { height: 100%; padding: 0 18px 18px; animation: view-in 0.45s var(--ease) both; }
 @keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
 .batch-open { width: 100%; margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.explore-btn { width: 100%; justify-content: center; }
+.explore-btn[hidden] { display: none; }
+.explore-btn kbd { margin-left: auto; }
+.explore-ideas { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; animation: rise 0.3s var(--ease) both; }
+.explore-head { display: flex; align-items: center; gap: 8px; }
+.explore-head .hint { flex: 1; }
+.chip.idea { text-align: left; border-radius: 12px; line-height: 1.35; white-space: normal; }
+.sample-tweaks {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin: -2px 0 6px 56px; padding: 8px 10px; border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--screen-line);
+  animation: rise 0.3s var(--ease) both;
+}
+.sample-tweaks small { color: var(--screen-ink-3); font-size: 12px; margin-right: 2px; }
+.sample-tweaks .chip { background: transparent; border-color: #2e3236; color: var(--screen-ink-2); }
+.sample-tweaks .chip:hover, .sample-tweaks .chip:focus-visible { color: var(--screen-ink); border-color: var(--sig); }
 .batch-dialog { width: min(640px, calc(100vw - 32px)); border: 1px solid var(--edge); border-radius: 16px; padding: 20px; background: var(--panel, var(--well)); color: var(--ink); }
 .batch-dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .batch-dialog form { display: flex; flex-direction: column; gap: 12px; }

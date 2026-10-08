@@ -2,6 +2,7 @@
 
 import { api } from "./api.js";
 import { initBatch } from "./batch.js";
+import { EXPLORE_MODES, initExplore, syncExplore } from "./explore.js";
 import { initFeed, track } from "./feed.js";
 import { icon } from "./icons.js";
 import { initLibrary, setSimilar, showLibrary } from "./library.js";
@@ -188,6 +189,7 @@ function setMode(mode, preferredModel) {
   onModelChange();
   syncTagChips();
   syncStyleField();
+  syncExplore(mode);
   numberSections();
 }
 
@@ -267,7 +269,7 @@ function currentTags() {
 
 function syncTagChips() {
   const active = new Set(currentTags().map((t) => t.toLowerCase()));
-  for (const chip of document.querySelectorAll(".chip")) chip.classList.toggle("on", active.has(chip.textContent.toLowerCase()));
+  for (const chip of document.querySelectorAll("#tag-groups .chip")) chip.classList.toggle("on", active.has(chip.textContent.toLowerCase()));
 }
 
 function toggleTag(tag) {
@@ -469,6 +471,23 @@ async function makeVariations(record) {
   }
 }
 
+// A result's Tweak menu: the same take pushed one way (darker, bigger, drier...).
+async function makeNudge({ record, nudge, label }) {
+  const key = `${record.id}:${nudge}`;
+  if (varying.has(key)) return;
+  varying.add(key);
+  try {
+    const job = await api.variations(record.id, { count: 2, nudge });
+    showView("generate");
+    track(job, () => makeNudge({ record, nudge, label }));
+    toast(`Making “${record.name}” ${label.toLowerCase()}…`);
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    varying.delete(key);
+  }
+}
+
 // From the Play tab: Loop mode in the key and tempo of a take.
 function applyLoopSettings({ key, scale, bpm, bars }) {
   showView("generate");
@@ -546,12 +565,19 @@ function moveFocus(delta) {
   next.scrollIntoView({ block: "nearest" });
 }
 
-const ROW_KEYS = { k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit", m: "midi", l: "similar", v: "variations" };
+const ROW_KEYS = {
+  k: "keep", x: "trash", f: "favorite", t: "useAsSource", s: "stems", e: "edit", m: "midi", l: "similar", v: "variations",
+  n: "tweak",
+};
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
     if ($("#view-generate").hidden) return; // the form isn't on screen: don't generate blind
     e.preventDefault();
+    if (e.shiftKey) {
+      if (EXPLORE_MODES.includes(state.mode)) $("#explore-btn").click();
+      return;
+    }
     $("#gen-form").requestSubmit();
     return;
   }
@@ -633,6 +659,7 @@ async function init() {
   document.addEventListener("samplegen:similar", (e) => { setSimilar(e.detail); showView("library"); });
   document.addEventListener("samplegen:loop-settings", (e) => applyLoopSettings(e.detail));
   document.addEventListener("samplegen:variations", (e) => makeVariations(e.detail));
+  document.addEventListener("samplegen:nudge", (e) => makeNudge(e.detail));
   document.addEventListener("samplegen:melody-source", (e) => applyMelodySource(e.detail));
   document.addEventListener("samplegen:styles", (e) => {
     setStyles(e.detail, state.savedStyle);
@@ -651,6 +678,7 @@ async function init() {
   initTrain();
   initPlay();
   initBatch();
+  initExplore({ readForm, track, showError: showFormError });
   for (const chip of document.querySelectorAll("#try-prompts .chip")) {
     chip.addEventListener("click", () => {
       if (state.mode !== "sfx") setMode("sfx");

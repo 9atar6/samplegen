@@ -55,6 +55,11 @@ On any sample: **Split into stems** (`S`, Demucs htdemucs_ft), **rename / tags**
 - **Shot list** (button under Generate): one sound per line (`door creak x8`, `footsteps on gravel | 12x | 3s`,
   `thunder | 20s | medium | loop`); samplegen queues them all, tags the results with the list's name, keeps the PC
   awake until it's done, and can export everything as a loudness-matched, round-robin pack at the end.
+- **Explore 4 ideas** (button under Generate, `Ctrl`+`Shift`+`Enter`; SFX, Free, Loop): type a word or two ("door",
+  "dark bass") or nothing at all; samplegen writes 4 contrasting prompts (in Loop mode, in Foundation-1's tags) and
+  makes one take of each. Pick the one you like by ear, then click its idea under the prompt to keep refining it.
+- **Tweak** (`N` on any sample): the same take again, made *darker, brighter, bigger, tighter, drier, roomier, grittier*
+  or *cleaner*. The prompt drops what contradicts the tweak and gains its words; 2 takes, named e.g. `door slam darker`.
 - **More like this** (`V` on any sample): 4 gentle variations of it, same name and tags (they export as round robins).
 - **Drum kit** mode: one style prompt → 12 pieces (General MIDI map) × 1–4 round robins, open hat choked by the closed
   hat; Decent Sampler + SFZ in `Kits\<name>\`, playable in the Play tab.
