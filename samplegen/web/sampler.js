@@ -2,8 +2,43 @@
 // shaped by velocity and a release envelope. Also renders a take offline to a WAV-ready buffer.
 
 const MIN_GAIN = 0.0001;
+// Same rule as instruments.note_onset: instruments made before notes were trimmed at their
+// attack can have up to a second of lead-in, which feels like the keyboard lagging.
+const ONSET_DB = -20;
+const ONSET_WINDOW_S = 0.01;
+const ONSET_PRE_ROLL_S = 0.005;
+const MAX_NOTE_LEAD_S = 1.5;
+
 function velocityGain(vel) {
   return Math.pow(0.12 + 0.88 * Math.max(0, Math.min(1, vel)), 2); // soft notes stay audible
+}
+
+// Seconds of lead-in before the note's attack (trailing 10 ms RMS within 20 dB of its peak).
+export function noteOnset(buffer) {
+  const frames = buffer.length;
+  const window = Math.max(1, Math.round(ONSET_WINDOW_S * buffer.sampleRate));
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+  const level = new Float32Array(frames);
+  let sum = 0;
+  for (let i = 0; i < frames; i++) {
+    let power = 0;
+    for (const data of channels) power += data[i] * data[i];
+    sum += power / channels.length;
+    if (i >= window) {
+      let old = 0;
+      for (const data of channels) old += data[i - window] * data[i - window];
+      sum -= old / channels.length;
+    }
+    level[i] = Math.sqrt(Math.max(0, sum) / window);
+  }
+  let peak = 0;
+  for (let i = 0; i < frames; i++) if (level[i] > peak) peak = level[i];
+  if (peak <= 0) return 0;
+  const threshold = peak * Math.pow(10, ONSET_DB / 20);
+  let onset = 0;
+  while (onset < frames && level[onset] < threshold) onset++;
+  const lead = (onset - window) / buffer.sampleRate - ONSET_PRE_ROLL_S;
+  return Math.min(MAX_NOTE_LEAD_S, Math.max(0, lead));
 }
 
 export class Sampler {
@@ -14,6 +49,7 @@ export class Sampler {
     this.output.connect(ctx.destination);
     this.samples = new Map(); // midi -> AudioBuffer
     this.loops = new Map(); // midi -> { start, end } in seconds (sustain loop, crossfade baked in)
+    this.onsets = new Map(); // midi -> seconds to skip so the note sounds the moment it's played
     this.hold = true; // held keys keep sounding through the loop
     this.roots = [];
     this.voices = new Map(); // midi -> voice
@@ -28,22 +64,27 @@ export class Sampler {
     this.allOff();
     const samples = new Map();
     const loops = new Map();
+    const onsets = new Map();
     let done = 0;
     await Promise.all(detail.notes.map(async (note) => {
       const res = await fetch(note.url);
       if (!res.ok) throw new Error(`Couldn't load note ${note.midi} (${res.status})`);
       const decoded = await this.ctx.decodeAudioData(await res.arrayBuffer());
+      const onset = detail.kind === "kit" ? 0 : noteOnset(decoded); // drum hits are trimmed already
       if (note.loop) {
         const { buffer, start, end } = withLoopCrossfade(this.ctx, decoded, note.loop);
         samples.set(note.midi, buffer);
         loops.set(note.midi, { start, end });
+        onsets.set(note.midi, Math.min(onset, Math.max(0, start - 0.05))); // never skip into the loop
       } else {
         samples.set(note.midi, decoded);
+        onsets.set(note.midi, onset);
       }
       onProgress?.(++done / detail.notes.length);
     }));
     this.samples = samples;
     this.loops = loops;
+    this.onsets = onsets;
     this.exact = detail.kind === "kit"; // a drum kit plays its own keys only: no repitched snares
     this.roots = [...samples.keys()].sort((a, b) => a - b);
     this.instrument = detail;
@@ -73,16 +114,24 @@ export class Sampler {
       src.loopEnd = loop.end;
     }
     const gain = ctx.createGain();
-    gain.gain.setValueAtTime(velocityGain(vel), when);
+    const onset = this.onsets.get(root) || 0;
+    if (onset > 0) { // skipping into the note: a 3 ms fade-in so the cut doesn't click
+      gain.gain.setValueAtTime(0, when);
+      gain.gain.linearRampToValueAtTime(velocityGain(vel), when + 0.003);
+    } else {
+      gain.gain.setValueAtTime(velocityGain(vel), when);
+    }
     src.connect(gain).connect(destination);
-    src.start(when);
+    src.start(when, onset);
     return { src, gain };
   }
 
   // `force`: stop even a drum hit (retrigger, Stop); otherwise kit hits ring out like one-shots.
   stopVoice(voice, when, release = this.release, force = false) {
     if (!voice || (this.exact && !force)) return;
-    voice.gain.gain.cancelScheduledValues(when);
+    // Hold the level reached so far: a release during the onset fade-in mustn't drop to silence.
+    if (voice.gain.gain.cancelAndHoldAtTime) voice.gain.gain.cancelAndHoldAtTime(when);
+    else voice.gain.gain.cancelScheduledValues(when);
     voice.gain.gain.setTargetAtTime(MIN_GAIN, when, Math.max(0.01, release / 4));
     try { voice.src.stop(when + release * 1.5 + 0.05); } catch { /* already stopped */ }
   }

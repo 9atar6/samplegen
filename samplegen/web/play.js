@@ -15,7 +15,7 @@ const noteName = (midi) => `${NOTE_NAMES[midi % 12]}${Math.floor(midi / 12) - 1}
 const PIANO_PAD = 5; // semitones shown beyond the sampled range (they still play, repitched)
 const DEFAULT_RANGE = [48, 84];
 
-const ctx = new (window.AudioContext || window.webkitAudioContext)();
+const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
 const sampler = new Sampler(ctx);
 const state = {
   instruments: [],
@@ -440,6 +440,9 @@ export function initPlay() {
 }
 
 export function showPlay() {
+  // A MIDI note isn't a user gesture, so it can't wake the audio: do it on this tab click,
+  // or the first notes from a MIDI keyboard come out late (or not at all).
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
   refreshInstruments();
   drawRoll();
   // Reconnect quietly if the browser already allowed MIDI before (no prompt then).

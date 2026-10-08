@@ -27,6 +27,14 @@ LOWEST_MIDI, HIGHEST_MIDI = 24, 96  # C1 .. C7
 MAX_NOTES = 61  # five octaves + 1
 EDGE_STRETCH = 6  # semitones the outermost samples cover beyond the generated range
 PREVIEW_NOTE_SECONDS = 0.6
+# The model doesn't always start a note on the grid: some come in up to a second late, after a
+# breath or the previous note's tail. Each note starts where it gets within 20 dB of its peak
+# (analysis.py's onset), less a few ms so the attack stays whole. Measured on real keybeds this
+# removes 300-600 ms of lag from late notes and at most ~70 ms of a pad's soft lead-in.
+ONSET_DB = -20.0
+ONSET_WINDOW_S = 0.01
+ONSET_PRE_ROLL_S = 0.005
+MAX_NOTE_LEAD_S = 1.5
 SPACES = ("Dry", "Wet")
 INSTRUMENT_DIR = "Instruments"
 
@@ -98,14 +106,34 @@ class InstrumentRequest:
             raise ValueError("Seed is out of range.")
 
 
+def note_onset(audio: np.ndarray, sample_rate: int) -> int:
+    """Frames of lead-in before a note's attack (0 if it starts on time, or is silent)."""
+    if not audio.size:
+        return 0
+    window = max(1, int(ONSET_WINDOW_S * sample_rate))
+    power = (audio ** 2).mean(axis=1)
+    # Trailing RMS window: a click can't trigger it, and it can only fire late, never early.
+    level = np.sqrt(np.convolve(power, np.ones(window) / window, "full")[:len(power)])
+    peak = float(level.max())
+    if peak <= 0:
+        return 0
+    onset = int(np.argmax(level >= peak * 10 ** (ONSET_DB / 20)))
+    onset -= window + int(ONSET_PRE_ROLL_S * sample_rate)
+    return min(max(0, onset), int(MAX_NOTE_LEAD_S * sample_rate))
+
+
 def slice_chunk(raw: np.ndarray, notes: list[int], sample_rate: int) -> dict[int, np.ndarray]:
-    """Cut one generated pass into its notes at the fixed 3.0 s / 0.25 s grid."""
+    """Cut one generated pass into its notes at the fixed 3.0 s / 0.25 s grid, each one
+    starting at its attack (a late note ends up a little shorter, never overlapping the next)."""
     note_frames = int(NOTE_SECONDS * sample_rate)
     slices = {}
     for index, midi in enumerate(notes):
         start = int(round(index * (NOTE_SECONDS + GAP_SECONDS) * sample_rate))
         note = fit_length(raw[start:start + note_frames], note_frames)
-        slices[midi] = apply_fades(note, sample_rate, fade_in_ms=2.0, fade_out_ms=40.0)
+        lead = note_onset(note, sample_rate)
+        note = note[lead:]
+        # Cut into a sounding note: a softer fade-in so the cut never clicks.
+        slices[midi] = apply_fades(note, sample_rate, fade_in_ms=10.0 if lead else 2.0, fade_out_ms=40.0)
     return slices
 
 

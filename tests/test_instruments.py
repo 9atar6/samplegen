@@ -7,8 +7,8 @@ import soundfile as sf
 from samplegen.audio import ExportFormat
 from samplegen.generation import Generator
 from samplegen.instruments import (
-    InstrumentRequest, chunk_notes, chunk_seconds, decent_sampler_preset, key_ranges, keybed_prompt,
-    midi_to_name, name_to_midi, normalize_together, sfz_file, slice_chunk,
+    MAX_NOTE_LEAD_S, InstrumentRequest, chunk_notes, chunk_seconds, decent_sampler_preset, key_ranges,
+    keybed_prompt, midi_to_name, name_to_midi, normalize_together, note_onset, sfz_file, slice_chunk,
 )
 from samplegen.library import Library
 
@@ -52,6 +52,27 @@ def test_slice_chunk_uses_the_fixed_grid():
         assert len(audio) == 3 * SR
         assert audio[SR].max() == pytest.approx(level)  # middle of the note
         assert audio[-1].max() == pytest.approx(0.0, abs=1e-9)  # faded out
+
+
+def test_slice_chunk_starts_each_note_at_its_attack():
+    # The model played note 61 half a second late in its slot, after some faint noise.
+    raw = np.zeros((int(chunk_seconds(2) * SR) + 1000, 2))
+    raw[0:3 * SR] = 0.5
+    late = int(3.25 * SR)
+    raw[late:late + int(0.5 * SR)] = 0.01  # -34 dB lead-in: not the note yet
+    raw[late + int(0.5 * SR):late + 3 * SR] = 0.5
+    notes = slice_chunk(raw, [60, 61], SR)
+    assert len(notes[60]) == 3 * SR  # on time: untouched
+    lead = 3 * SR - len(notes[61])
+    assert 0.48 * SR < lead <= 0.5 * SR  # trimmed to a few ms before the attack
+    assert notes[61][int(0.02 * SR)].max() == pytest.approx(0.5)  # the note is there right away
+
+
+def test_note_onset_is_capped_and_ignores_silence():
+    assert note_onset(np.zeros((SR, 2)), SR) == 0
+    late = np.zeros((3 * SR, 2))
+    late[int(2.5 * SR):] = 0.5
+    assert note_onset(late, SR) == int(MAX_NOTE_LEAD_S * SR)
 
 
 def test_normalize_together_keeps_relative_levels():
